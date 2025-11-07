@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, Field, computed_field
 
@@ -71,6 +71,7 @@ class WorkflowStats(BaseModel):
     duration_seconds: float = 0.0
     used_fallback: bool = False
     source_summary: dict[str, int] = Field(default_factory=dict)
+    extraction_metrics: dict[str, Any] = Field(default_factory=dict)
 
 
 class ComparisonResponse(BaseModel):

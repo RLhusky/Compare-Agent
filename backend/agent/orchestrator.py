@@ -116,6 +116,12 @@ class ProductComparisonAgent:
             if len(extracted_products) < 2:
                 raise ValueError("Insufficient product data extracted.")
 
+            logger.info(
+                "product_extraction_summary",
+                product_count=len(extracted_products),
+                **extraction_outcome.metadata,
+            )
+
             comparison_outcome = await steps.generate_comparison_analysis(
                 products=extracted_products,
                 metrics=metrics_result.metrics,
@@ -143,6 +149,7 @@ class ProductComparisonAgent:
                 duration_seconds=perf_counter() - start_time,
                 used_fallback=used_fallback,
                 source_summary=self._summarize_sources(candidates),
+                extraction_metrics=extraction_outcome.metadata,
             )
 
             response = ComparisonResponse(

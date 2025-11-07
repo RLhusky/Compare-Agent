@@ -37,6 +37,16 @@ class StepOutcome(Generic[T]):
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class ExtractionResult:
+    """Represents the outcome of a single product extraction attempt."""
+
+    data: ProductExtraction | None
+    used_api: bool
+    from_cache: bool
+    error: str | None = None
+
+
 def _normalize_category(category: str) -> str:
     return category.lower().strip().replace(" ", "_")
 
@@ -176,10 +186,14 @@ async def fallback_discovery(
     for item in products_payload:
         if not isinstance(item, dict):
             continue
+        name = item.get("name")
+        if not name:
+            logger.warning("fallback_product_missing_name", item=item)
+            continue
         discovery_method = item.get("discovery_method") or "best_sellers"
         products.append(
             CandidateProduct(
-                name=item.get("name", "unknown"),
+                name=name,
                 discovery_method=discovery_method,
                 source_url=item.get("source_url"),
                 source=item.get("source"),
@@ -197,7 +211,7 @@ async def _extract_single_product(
     settings: Settings,
     cache: RedisCache,
     use_cache: bool,
-) -> ProductExtraction | None:
+) -> ExtractionResult:
     """Run Step 4 extraction for a single product with caching."""
 
     normalized = product.name.lower().strip().replace(" ", "_")
@@ -208,7 +222,8 @@ async def _extract_single_product(
         cached_payload = await cache.get_json(cache_key)
         if cached_payload:
             try:
-                return ProductExtraction.model_validate(cached_payload)
+                extraction = ProductExtraction.model_validate(cached_payload)
+                return ExtractionResult(data=extraction, used_api=False, from_cache=True)
             except Exception:
                 logger.warning("product_cache_deserialize_failed", product=product.name)
 
@@ -229,28 +244,28 @@ async def _extract_single_product(
         )
     except asyncio.TimeoutError:
         logger.warning("product_extraction_timeout", product=product.name)
-        return None
+        return ExtractionResult(data=None, used_api=True, from_cache=False, error="timeout")
 
     content = response.get("choices", [{}])[0].get("message", {}).get("content", "{}")
     try:
         payload = json.loads(content)
     except json.JSONDecodeError:
         logger.warning("product_extraction_parse_failed", product=product.name)
-        return None
+        return ExtractionResult(data=None, used_api=True, from_cache=False, error="parse_error")
 
     mandatory_fields = ("image_url", "link", "description")
     if not all(payload.get(field) for field in mandatory_fields):
         logger.warning("product_missing_mandatory_fields", product=product.name, payload=payload)
-        return None
+        return ExtractionResult(data=None, used_api=True, from_cache=False, error="missing_fields")
 
     try:
         extraction = ProductExtraction.model_validate({"name": product.name, **payload})
     except Exception as exc:
         logger.warning("product_extraction_validation_failed", product=product.name, error=str(exc))
-        return None
+        return ExtractionResult(data=None, used_api=True, from_cache=False, error="validation_failed")
 
     await cache.set_json(cache_key, extraction.model_dump(mode="json"), ttl_seconds=settings.product_ttl_seconds)
-    return extraction
+    return ExtractionResult(data=extraction, used_api=True, from_cache=False)
 
 
 async def extract_product_data(
@@ -263,29 +278,91 @@ async def extract_product_data(
 ) -> StepOutcome[list[ProductExtraction]]:
     """Step 4: Parallel extraction of product metadata."""
 
-    semaphore = asyncio.Semaphore(settings.extraction_max_concurrency)
-    extracted: list[ProductExtraction] = []
-    api_calls = 0
+    if not products:
+        return StepOutcome(
+            data=[],
+            api_calls=0,
+            metadata={"attempts": 0, "cache_hits": 0, "failures": 0, "timed_out": False},
+        )
 
-    async def worker(candidate: CandidateProduct) -> None:
-        nonlocal api_calls
+    semaphore = asyncio.Semaphore(settings.extraction_max_concurrency)
+
+    async def worker(candidate: CandidateProduct) -> ExtractionResult:
         async with semaphore:
-            result = await _extract_single_product(
+            return await _extract_single_product(
                 client=client,
                 product=candidate,
                 settings=settings,
                 cache=cache,
                 use_cache=use_cache,
             )
-            if result:
-                extracted.append(result)
-                api_calls += 1
 
     tasks = [asyncio.create_task(worker(product)) for product in products]
-    await asyncio.gather(*tasks)
+    done: set[asyncio.Task[ExtractionResult]] = set()
+    pending: set[asyncio.Task[ExtractionResult]] = set()
 
+    try:
+        done, pending = await asyncio.wait(tasks, timeout=settings.step_timeout_seconds)
+    except Exception as exc:  # pragma: no cover - unexpected scheduling error
+        logger.exception("product_extraction_wait_failed", error=str(exc))
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        return StepOutcome(
+            data=[],
+            api_calls=0,
+            metadata={"attempts": 0, "cache_hits": 0, "failures": 0, "timed_out": True},
+        )
+
+    if pending:
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        logger.warning(
+            "product_extraction_step_timeout",
+            pending=len(pending),
+            total=len(tasks),
+            timeout=settings.step_timeout_seconds,
+        )
+
+    results: list[ExtractionResult] = []
+    task_exceptions = 0
+    for task in done:
+        try:
+            results.append(task.result())
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("product_extraction_task_exception", error=str(exc))
+            task_exceptions += 1
+
+    cache_hits = sum(1 for result in results if result.from_cache)
+    extracted: list[ProductExtraction] = [result.data for result in results if result.data]
     extracted.sort(key=lambda p: p.name)
-    return StepOutcome(data=extracted, api_calls=api_calls)
+
+    api_attempts = sum(1 for result in results if result.used_api)
+    failures = sum(1 for result in results if result.used_api and result.data is None)
+
+    if task_exceptions:
+        api_attempts += task_exceptions
+        failures += task_exceptions
+
+    if pending:
+        api_attempts += len(pending)
+        failures += len(pending)
+
+    metadata = {
+        "total_candidates": len(products),
+        "attempts": api_attempts,
+        "cache_hits": cache_hits,
+        "failures": failures,
+        "timed_out": bool(pending),
+    }
+
+    return StepOutcome(
+        data=extracted,
+        api_calls=api_attempts,
+        used_cache=cache_hits > 0,
+        metadata=metadata,
+    )
 
 
 async def generate_comparison_analysis(

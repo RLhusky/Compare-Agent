@@ -27,20 +27,22 @@ def configure_logging(settings: Settings | None = None) -> None:
     else:
         renderer = structlog.dev.ConsoleRenderer()
 
+    numeric_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
             *shared_processors,
             renderer,
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelName(settings.log_level.upper())),
+        wrapper_class=structlog.make_filtering_bound_logger(numeric_level),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),
         cache_logger_on_first_use=True,
     )
 
     logging.basicConfig(
-        level=settings.log_level.upper(),
+        level=numeric_level,
         format="%(message)s",
     )
 
