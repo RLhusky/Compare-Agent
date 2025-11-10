@@ -10,6 +10,7 @@ from typing import Sequence
 
 from backend.agent import steps
 from backend.api.grok_client import GrokClient
+from backend.api.sonar_client import SonarClient
 from backend.cache.redis_cache import RedisCache
 from backend.logging_config import get_logger
 from backend.models.schemas import CandidateProduct, CompareRequest, ComparisonResponse, WorkflowStats
@@ -32,6 +33,7 @@ class ProductComparisonAgent:
     """Coordinates the multi-step agent workflow."""
 
     client: GrokClient
+    sonar_client: SonarClient
     cache: RedisCache
     settings: Settings
 
@@ -39,11 +41,13 @@ class ProductComparisonAgent:
     def from_settings(cls, settings: Settings | None = None) -> "ProductComparisonAgent":
         settings = settings or get_settings()
         client = GrokClient(settings=settings)
+        sonar_client = SonarClient(settings=settings)
         cache = RedisCache(url=settings.redis_url, enabled=settings.cache_enabled)
-        return cls(client=client, cache=cache, settings=settings)
+        return cls(client=client, sonar_client=sonar_client, cache=cache, settings=settings)
 
     async def close(self) -> None:
         await self.client.close()
+        await self.sonar_client.close()
         await self.cache.close()
 
     async def compare_products(self, request: CompareRequest) -> ComparisonResponse:
@@ -66,82 +70,52 @@ class ProductComparisonAgent:
                 return response
 
         async with asyncio.timeout(self.settings.workflow_timeout_seconds):
-            metrics_outcome = await steps.discover_metrics(
-                category=category,
-                client=self.client,
-                cache=self.cache,
-                settings=self.settings,
-                use_cache=request.use_cache,
-            )
-            metrics_result = metrics_outcome.data
-            api_calls += metrics_outcome.api_calls
-
-            self._ensure_budget(api_calls)
-
-            ranking_outcome = await steps.find_products_from_ranking_sites(
+            discovery_outcome = await steps.sonar_discovery(
                 category=category,
                 constraints=constraints,
-                client=self.client,
-            )
-            api_calls += ranking_outcome.api_calls
-            self._ensure_budget(api_calls)
-
-            candidates = ranking_outcome.data
-            confidence = ranking_outcome.metadata.get("confidence", "low")
-            if len(candidates) < 3 or confidence == "low":
-                used_fallback = True
-                fallback_outcome = await steps.fallback_discovery(
-                    category=category,
-                    constraints=constraints,
-                    client=self.client,
-                )
-                api_calls += fallback_outcome.api_calls
-                self._ensure_budget(api_calls)
-                candidates = self._merge_candidates(candidates, fallback_outcome.data)
-
-            if not candidates:
-                raise ValueError("No products discovered for comparison.")
-
-            extraction_outcome = await steps.extract_product_data(
-                products=candidates,
-                client=self.client,
-                settings=self.settings,
+                sonar_client=self.sonar_client,
                 cache=self.cache,
+                settings=self.settings,
                 use_cache=request.use_cache,
             )
-            api_calls += extraction_outcome.api_calls
+            metrics_result = discovery_outcome.data
+            api_calls += discovery_outcome.api_calls
             self._ensure_budget(api_calls)
 
-            extracted_products = extraction_outcome.data
-            if len(extracted_products) < 2:
+            candidates = discovery_outcome.metadata.get("products", [])
+            if not candidates:
+                raise ValueError("Sonar discovery did not return any products.")
+
+            research_outcome = await steps.research_products(
+                products=candidates,
+                sonar_client=self.sonar_client,
+                cache=self.cache,
+                settings=self.settings,
+                metrics=metrics_result.metrics,
+                use_cache=request.use_cache,
+            )
+            api_calls += research_outcome.api_calls
+            self._ensure_budget(api_calls)
+
+            research_products = research_outcome.data
+            if len(research_products) < 2:
                 raise ValueError("Insufficient product data extracted.")
 
             logger.info(
-                "product_extraction_summary",
-                product_count=len(extracted_products),
-                **extraction_outcome.metadata,
+                "product_research_summary",
+                product_count=len(research_products),
+                **research_outcome.metadata,
             )
 
-            comparison_outcome = await steps.generate_comparison_analysis(
-                products=extracted_products,
+            comparison_outcome = await steps.generate_comparison_payload(
+                research_products=research_products,
                 metrics=metrics_result.metrics,
-                client=self.client,
+                grok_client=self.client,
             )
             api_calls += comparison_outcome.api_calls
             self._ensure_budget(api_calls)
 
-            comparison_text = comparison_outcome.data
-
-            formatting_outcome = await steps.format_for_display(
-                comparison_text=comparison_text,
-                products=extracted_products,
-                metrics=metrics_result.metrics,
-                client=self.client,
-            )
-            api_calls += formatting_outcome.api_calls
-            self._ensure_budget(api_calls)
-
-            comparison_payload = formatting_outcome.data
+            comparison_payload = comparison_outcome.data
             display_products = comparison_payload.products
 
             stats = WorkflowStats(
@@ -149,7 +123,14 @@ class ProductComparisonAgent:
                 duration_seconds=perf_counter() - start_time,
                 used_fallback=used_fallback,
                 source_summary=self._summarize_sources(candidates),
-                extraction_metrics=extraction_outcome.metadata,
+                extraction_metrics={
+                    "research": research_outcome.metadata,
+                    "comparison": comparison_outcome.metadata,
+                    "discovery": {
+                        "searches_used": discovery_outcome.metadata.get("searches_used", 0),
+                        "status": discovery_outcome.metadata.get("status"),
+                    },
+                },
             )
 
             response = ComparisonResponse(
@@ -173,13 +154,6 @@ class ProductComparisonAgent:
     def _ensure_budget(self, api_calls: int) -> None:
         if api_calls > self.settings.max_api_calls_per_comparison:
             raise WorkflowBudgetExceeded("API call budget exceeded for comparison request.")
-
-    @staticmethod
-    def _merge_candidates(primary: Sequence[CandidateProduct], fallback: Sequence[CandidateProduct]) -> list[CandidateProduct]:
-        combined: dict[str, CandidateProduct] = {candidate.name: candidate for candidate in primary}
-        for candidate in fallback:
-            combined.setdefault(candidate.name, candidate)
-        return list(combined.values())
 
     @staticmethod
     def _summarize_sources(candidates: Sequence[CandidateProduct]) -> dict[str, int]:

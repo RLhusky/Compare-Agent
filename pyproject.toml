@@ -13,7 +13,11 @@ dependencies = [
     "redis>=5.0.0",
     "structlog>=24.1.0",
     "tenacity>=9.0.0",
-    "uvicorn[standard]>=0.30.0"
+    "uvicorn[standard]>=0.30.0",
+    "apscheduler>=3.10.4",
+    "prometheus-client>=0.20.0",
+    "requests>=2.32.0",
+    "fuzzywuzzy[speedup]>=0.18.0"
 ]
 
 [project.optional-dependencies]
