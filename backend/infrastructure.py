@@ -1360,6 +1360,7 @@ def endpoint_wrapper(
 
             try:
                 if method == "OPTIONS":
+                    # Short circuit CORS pre-flight requests. These never reach the business logic.
                     body, status_code = handle_options_request()
                     payload = _coerce_to_dict(body)
                     payload["request_id"] = request_id
@@ -1368,6 +1369,7 @@ def endpoint_wrapper(
                     return add_cors_headers(response, request)
 
                 if requires_auth:
+                    # Gate access based on the decorator flags.
                     if requires_admin:
                         require_admin_auth(request)
                     else:
@@ -1376,6 +1378,7 @@ def endpoint_wrapper(
                 user_id = getattr(request, "user_id", "anonymous")
 
                 if rate_limit_config:
+                    # Enforce per-user rate limits backed by Redis.
                     max_req = int(rate_limit_config.get("requests", CONFIG["RATE_LIMIT_REQUESTS"]))
                     window = int(rate_limit_config.get("window", CONFIG["RATE_LIMIT_WINDOW"]))
                     allowed, _, reset = check_rate_limit(user_id, fn.__name__, max_req, window)
@@ -1395,8 +1398,10 @@ def endpoint_wrapper(
                         return add_cors_headers(response, request)
 
                 if is_coroutine:
+                    # Async endpoints are awaited directly.
                     result = await fn(request, *args, **kwargs)
                 else:
+                    # Sync endpoints run in-process.
                     result = fn(request, *args, **kwargs)
 
                 response = _build_response(result, request_id)
@@ -1561,6 +1566,7 @@ async def compare_endpoint(request: Request) -> tuple[dict[str, Any], int]:
     LOG_INFO("Compare request received", user_id=getattr(request, "user_id", "anonymous"))
 
     try:
+        # FastAPI exposes the request body as async to avoid blocking the loop.
         data = await request.json()
     except Exception:
         return {
@@ -1603,6 +1609,7 @@ async def compare_endpoint(request: Request) -> tuple[dict[str, Any], int]:
     comparison_start = time.time()
 
     try:
+        # Kick off the orchestrator workflow (metrics discovery → product comparison).
         result = await run_full_comparison_with_caching(category, constraints)
         comparison_duration = time.time() - comparison_start
         searches_used = result.stats.api_calls
@@ -1796,6 +1803,7 @@ async def admin_invalidate_product_cache(request: Request) -> tuple[dict[str, An
         product=product_name,
     )
 
+    # Product cache entries can be keyed by ID, name, or both. Collect every possibility.
     keys = await asyncio.to_thread(generate_product_cache_key, product_id, product_name)
     deleted_primary = await _delete_keys(keys)
 
@@ -1890,6 +1898,7 @@ async def admin_cache_stats(request: Request) -> tuple[dict[str, Any], int]:
     LOG_INFO("Admin requesting cache stats", admin_user=getattr(request, "user_id", "unknown_admin"))
 
     try:
+        # Run the Redis scans in parallel threads to avoid blocking the event loop.
         query_count, product_count, alias_count = await asyncio.gather(
             _count_keys("comparison:*"),
             _count_keys("product:*"),

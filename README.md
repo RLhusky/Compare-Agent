@@ -23,16 +23,38 @@ backend/
     steps.py          # Step implementations
   api/
     grok_client.py    # HTTP client wrapper with retries & timeouts
-    routes.py         # FastAPI routes (compare + health)
   cache/
     redis_cache.py    # Redis-backed cache helper
   logging_config.py   # structlog configuration utilities
   models/
     schemas.py        # Pydantic models for requests/responses
+  infrastructure.py   # Production-ready infrastructure, middleware, and endpoints
 config.py             # Environment-driven settings
 main.py               # FastAPI application entry point
 pyproject.toml        # Dependencies and tooling
 ```
+
+## infrastructure.py In Plain English
+`backend/infrastructure.py` is the “control tower” for the entire backend. Here is what it does, using everyday language:
+
+- **Gets the house in order first.** It reads the environment settings, sets up logging, connects to Redis, and gets API clients ready so the rest of the code can depend on them.
+- **Keeps track of what is happening.** It records metrics for Prometheus, logs every important event, and monitors the cost of serving each comparison request.
+- **Checks who is knocking.** It validates API keys, enforces admin-only routes, applies rate limits, and stops suspicious input before it can cause problems.
+- **Wraps every endpoint in safety gear.** The `endpoint_wrapper` decorator adds CORS headers, runs authentication, throttles traffic, times out slow handlers, logs results, and converts errors into friendly JSON responses.
+- **Runs the main “compare products” request.** The `/api/v1/compare` endpoint cleans up the user’s request, runs the full multi-step comparison workflow, and packages the answer for the frontend—all with the guardrails above.
+- **Offers quick health updates.** The `/health`, `/ready`, and `/metrics` endpoints make it easy for load balancers and dashboards to know if the service is healthy.
+- **Gives operators the tools they need.** Admin-only routes can clear product/query caches, fetch cache statistics, or trigger the scheduled price-refresh job on demand.
+- **Starts the show.** The `create_app()` function wires everything into FastAPI, registers error handlers, and plugs in startup/shutdown hooks so background jobs and connections are opened and closed cleanly.
+
+You can think of the file as a well-organised playbook: every helper builds towards keeping the main comparison experience reliable, observable, and safe.
+
+## Delivery Status & Next Moves
+- ✅ Infrastructure and HTTP layer are production-ready: configuration, logging, metrics, Redis, auth, rate limiting, comparison endpoint, admin utilities, and lifecycle hooks are all implemented and tested for syntax.
+- 🔄 Remaining work:
+  - Write automated tests (unit + integration) to lock in behaviour and prevent regressions.
+  - Fill in any missing Redis maintenance functions backed by real data (e.g. product price index) and verify against staging data.
+  - Deploy to a staging environment, run load tests, and confirm observability dashboards (Prometheus, logs) capture the right signals.
+  - Update operational runbooks with the new admin endpoints and failure recovery steps.
 
 ## Six-Step Workflow
 1. **Metric Discovery** (`grok-4-fast-reasoning`)  
