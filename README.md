@@ -25,17 +25,23 @@ backend/
     grok_client.py    # HTTP client wrapper with retries & timeouts
   cache/
     redis_cache.py    # Redis-backed cache helper
-  logging_config.py   # structlog configuration utilities
-  models/
-    schemas.py        # Pydantic models for requests/responses
-  infrastructure.py   # Production-ready infrastructure, middleware, and endpoints
+    logging_config.py   # structlog configuration utilities
+    models/
+      schemas.py        # Pydantic models for requests/responses
+    infrastructure/
+      __init__.py       # Exposes FastAPI app factory
+      bootstrap.py      # Config, logging, metrics, Redis, API clients, background jobs
+      auth.py           # AuthN/AuthZ, validation, rate limiting helpers
+      middleware.py     # Endpoint wrapper, CORS, timeout utilities
+      endpoints.py      # Public/admin routes and error handlers
+      app.py            # FastAPI wiring and lifecycle hooks
 config.py             # Environment-driven settings
 main.py               # FastAPI application entry point
 pyproject.toml        # Dependencies and tooling
 ```
 
-## infrastructure.py In Plain English
-`backend/infrastructure.py` is the “control tower” for the entire backend. Here is what it does, using everyday language:
+## Infrastructure Package In Plain English
+The files inside `backend/infrastructure/` work together as the “control tower” for the entire backend. In everyday language, they do the following:
 
 - **Gets the house in order first.** It reads the environment settings, sets up logging, connects to Redis, and gets API clients ready so the rest of the code can depend on them.
 - **Keeps track of what is happening.** It records metrics for Prometheus, logs every important event, and monitors the cost of serving each comparison request.
