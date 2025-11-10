@@ -15,6 +15,7 @@ misconfiguration is caught during startup rather than in production traffic.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -22,18 +23,30 @@ import re
 import sys
 import threading
 import time
+import traceback
 from collections.abc import Callable, Generator, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from datetime import datetime
+from functools import wraps
+from secrets import token_hex
 from typing import Any, TypeVar, cast
 
 import requests
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
+from fastapi import APIRouter, FastAPI, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, PlainTextResponse
+import prometheus_client
 from prometheus_client import Counter, Gauge, Histogram
 from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionErrorType
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from backend.agent.orchestrator import ProductComparisonAgent, WorkflowBudgetExceeded
+from backend.models.schemas import CompareRequest, ComparisonResponse
+from config import get_settings
 
 try:
     # FuzzyWuzzy is the requested library; RapidFuzz is a faster drop-in
@@ -838,9 +851,26 @@ def _execute_with_timeout(func: Callable[..., Any], args: tuple[Any, ...], kwarg
 
 
 def timeout_decorator(seconds: int) -> Callable[[F], F]:
-    """Decorator to enforce execution timeout on synchronous functions."""
+    """Decorator to enforce execution timeout on synchronous or async functions."""
 
     def decorator(func: F) -> F:
+        if asyncio.iscoroutinefunction(func):
+
+            @wraps(func)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                try:
+                    return await asyncio.wait_for(func(*args, **kwargs), timeout=seconds)
+                except asyncio.TimeoutError:
+                    LOG_ERROR("Request timeout", function=func.__name__, timeout=seconds)
+                    METRICS.increment("request.timeout")
+                    return {
+                        "status": "ERROR",
+                        "error": "Request timeout",
+                        "error_code": "TIMEOUT",
+                    }, 504
+
+            return cast(F, async_wrapper)
+
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
@@ -1218,3 +1248,882 @@ COST_PER_SEARCH=0.005
 COST_PER_SECOND=0.001
 """
 
+
+# =============================================================================
+# ENDPOINT WRAPPER WITH MIDDLEWARE
+# =============================================================================
+
+
+def generate_request_id() -> str:
+    """Generate a unique, human-searchable request identifier."""
+
+    return f"req_{int(time.time() * 1000)}_{token_hex(4)}"
+
+
+def _get_request_method(request: Any) -> str:
+    """Return the HTTP method for logging."""
+
+    return getattr(request, "method", "UNKNOWN").upper()
+
+
+def _get_request_path(request: Any) -> str:
+    """Return the path associated with the request."""
+
+    url = getattr(request, "url", None)
+    if url and hasattr(url, "path"):
+        return url.path
+    return getattr(request, "path", "/unknown")
+
+
+def _get_request_ip(request: Any) -> str:
+    """Extract the caller IP address."""
+
+    client = getattr(request, "client", None)
+    if client and hasattr(client, "host") and client.host:
+        return client.host
+    return getattr(request, "remote_addr", "unknown")
+
+
+def _coerce_to_dict(payload: Any) -> dict[str, Any]:
+    """Convert arbitrary payloads into JSON-serialisable dictionaries."""
+
+    if isinstance(payload, dict):
+        return payload
+    if payload is None:
+        return {}
+    if isinstance(payload, (list, tuple, set)):
+        return {"data": list(payload)}
+    if isinstance(payload, bytes):
+        try:
+            return json.loads(payload.decode("utf-8"))
+        except Exception:
+            return {"data": payload.decode("utf-8", errors="ignore")}
+    if isinstance(payload, str):
+        try:
+            return json.loads(payload)
+        except Exception:
+            return {"message": payload}
+    return {"data": payload}
+
+
+def _build_response(result: Any, request_id: str) -> Response:
+    """Normalise endpoint return values into a FastAPI Response."""
+
+    headers: dict[str, str] = {}
+
+    if isinstance(result, Response):
+        result.headers.setdefault("X-Request-ID", request_id)
+        return result
+
+    if isinstance(result, tuple):
+        if len(result) == 3:
+            body, status_code, extra_headers = result
+            headers = dict(extra_headers or {})
+        elif len(result) == 2:
+            body, status_code = result
+        else:  # pragma: no cover - defensive programming for unexpected tuples
+            raise ValueError("Endpoint tuples must contain (body, status) or (body, status, headers).")
+    else:
+        body, status_code = result, 200
+
+    body_dict = _coerce_to_dict(body)
+    body_dict.setdefault("status", "SUCCESS" if status_code < 400 else "ERROR")
+    body_dict["request_id"] = request_id
+
+    response = JSONResponse(content=body_dict, status_code=status_code)
+    response.headers.update(headers)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+def endpoint_wrapper(
+    func: Callable[..., Any] | None = None,
+    *,
+    requires_auth: bool = True,
+    requires_admin: bool = False,
+    rate_limit_config: dict[str, int] | None = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Decorator that layers logging, auth, rate limiting, metrics, and error handling."""
+
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        is_coroutine = asyncio.iscoroutinefunction(fn)
+
+        @wraps(fn)
+        async def wrapped_endpoint(request: Request, *args: Any, **kwargs: Any) -> Response:
+            request_id = generate_request_id()
+            start_time = time.time()
+            method = _get_request_method(request)
+            path = _get_request_path(request)
+            ip = _get_request_ip(request)
+
+            LOG_INFO("Request received", request_id=request_id, method=method, path=path, ip=ip)
+
+            try:
+                if method == "OPTIONS":
+                    body, status_code = handle_options_request()
+                    payload = _coerce_to_dict(body)
+                    payload["request_id"] = request_id
+                    response = JSONResponse(content=payload, status_code=status_code)
+                    response.headers["X-Request-ID"] = request_id
+                    return add_cors_headers(response, request)
+
+                if requires_auth:
+                    if requires_admin:
+                        require_admin_auth(request)
+                    else:
+                        require_auth(request)
+
+                user_id = getattr(request, "user_id", "anonymous")
+
+                if rate_limit_config:
+                    max_req = int(rate_limit_config.get("requests", CONFIG["RATE_LIMIT_REQUESTS"]))
+                    window = int(rate_limit_config.get("window", CONFIG["RATE_LIMIT_WINDOW"]))
+                    allowed, _, reset = check_rate_limit(user_id, fn.__name__, max_req, window)
+                    if not allowed:
+                        retry_after = max(reset - int(time.time()), 0)
+                        payload = {
+                            "status": "ERROR",
+                            "error": "Rate limit exceeded",
+                            "error_code": "RATE_LIMIT_EXCEEDED",
+                            "retry_after": retry_after,
+                            "request_id": request_id,
+                        }
+                        response = JSONResponse(content=payload, status_code=status.HTTP_429_TOO_MANY_REQUESTS)
+                        response.headers["Retry-After"] = str(retry_after)
+                        response.headers["X-Request-ID"] = request_id
+                        METRICS.increment("request.rate_limit", endpoint=fn.__name__)
+                        return add_cors_headers(response, request)
+
+                if is_coroutine:
+                    result = await fn(request, *args, **kwargs)
+                else:
+                    result = fn(request, *args, **kwargs)
+
+                response = _build_response(result, request_id)
+                duration = time.time() - start_time
+
+                LOG_INFO(
+                    "Request completed",
+                    request_id=request_id,
+                    status=response.status_code,
+                    duration=duration,
+                    user_id=getattr(request, "user_id", "anonymous"),
+                )
+                METRICS.histogram("request.duration", duration, endpoint=fn.__name__)
+
+                metric_name = "request.success" if response.status_code < 400 else "request.failure"
+                METRICS.increment(metric_name, endpoint=fn.__name__)
+
+                return add_cors_headers(response, request)
+
+            except AuthenticationError as exc:
+                duration = time.time() - start_time
+                LOG_WARNING("Authentication failed", request_id=request_id, error=str(exc), duration=duration)
+                METRICS.increment("request.auth_error", endpoint=fn.__name__)
+                payload = {
+                    "status": "ERROR",
+                    "error": str(exc),
+                    "error_code": "AUTHENTICATION_FAILED",
+                    "request_id": request_id,
+                }
+                response = JSONResponse(content=payload, status_code=status.HTTP_401_UNAUTHORIZED)
+                response.headers["X-Request-ID"] = request_id
+                return add_cors_headers(response, request)
+
+            except AuthorizationError as exc:
+                duration = time.time() - start_time
+                LOG_WARNING("Authorization failed", request_id=request_id, error=str(exc), duration=duration)
+                METRICS.increment("request.authz_error", endpoint=fn.__name__)
+                payload = {
+                    "status": "ERROR",
+                    "error": str(exc),
+                    "error_code": "AUTHORIZATION_FAILED",
+                    "request_id": request_id,
+                }
+                response = JSONResponse(content=payload, status_code=status.HTTP_403_FORBIDDEN)
+                response.headers["X-Request-ID"] = request_id
+                return add_cors_headers(response, request)
+
+            except RateLimitExceeded as exc:
+                duration = time.time() - start_time
+                LOG_WARNING(
+                    "Rate limit exceeded",
+                    request_id=request_id,
+                    user_id=getattr(request, "user_id", "anonymous"),
+                    duration=duration,
+                )
+                METRICS.increment("request.rate_limit", endpoint=fn.__name__)
+
+                payload: dict[str, Any]
+                if exc.args:
+                    try:
+                        payload = json.loads(exc.args[0])
+                    except (TypeError, json.JSONDecodeError):
+                        payload = {}
+                else:
+                    payload = {}
+
+                payload.setdefault("status", "ERROR")
+                payload.setdefault("error", "Rate limit exceeded")
+                payload.setdefault("error_code", "RATE_LIMIT_EXCEEDED")
+                payload["request_id"] = request_id
+
+                response = JSONResponse(content=payload, status_code=status.HTTP_429_TOO_MANY_REQUESTS)
+                response.headers["X-Request-ID"] = request_id
+                return add_cors_headers(response, request)
+
+            except Exception as exc:
+                duration = time.time() - start_time
+                LOG_ERROR(
+                    "Request failed",
+                    request_id=request_id,
+                    error=str(exc),
+                    traceback=traceback.format_exc(),
+                    duration=duration,
+                )
+                METRICS.increment("request.error", endpoint=fn.__name__)
+
+                payload = {
+                    "status": "ERROR",
+                    "error": "Internal server error",
+                    "error_code": "INTERNAL_ERROR",
+                    "request_id": request_id,
+                }
+                if CONFIG["DEBUG"]:
+                    payload["error_details"] = str(exc)
+
+                response = JSONResponse(content=payload, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                response.headers["X-Request-ID"] = request_id
+                return add_cors_headers(response, request)
+
+        return wrapped_endpoint
+
+    if func is not None:
+        return decorator(func)
+
+    return decorator
+
+
+# =============================================================================
+# COMPARISON SERVICE HELPERS
+# =============================================================================
+
+
+async def run_full_comparison_with_caching(
+    category: str,
+    constraints: str | None,
+    *,
+    use_cache: bool = True,
+) -> ComparisonResponse:
+    """Execute the full comparison workflow using the orchestrator."""
+
+    settings = get_settings()
+    compare_request = CompareRequest(category=category, constraints=constraints, use_cache=use_cache)
+    agent = ProductComparisonAgent.from_settings(settings=settings)
+    try:
+        return await agent.compare_products(compare_request)
+    finally:
+        await agent.close()
+
+
+def _comparison_response_to_payload(result: ComparisonResponse) -> dict[str, Any]:
+    """Convert the orchestrator response into the public API payload structure."""
+
+    return {
+        "status": "SUCCESS",
+        "request": result.request.model_dump(mode="json"),
+        "metrics": result.metrics.model_dump(mode="json"),
+        "products": [product.model_dump(mode="json") for product in result.products],
+        "comparison": result.comparison.model_dump(mode="json"),
+        "comparison_table": result.comparison.metrics_table.model_dump(mode="json"),
+        "metadata": {
+            "workflow_stats": result.stats.model_dump(mode="json"),
+            "cached_result": result.cached_result,
+        },
+        "cache_hit": result.cached_result,
+        "generated_at": result.generated_at.isoformat(),
+    }
+
+
+# =============================================================================
+# PUBLIC ENDPOINTS
+# =============================================================================
+
+
+@endpoint_wrapper(
+    requires_auth=True,
+    rate_limit_config={"requests": 10, "window": 60},
+)
+@timeout_decorator(seconds=CONFIG["MAX_REQUEST_TIMEOUT"])
+async def compare_endpoint(request: Request) -> tuple[dict[str, Any], int]:
+    """Handle POST /api/v1/compare requests."""
+
+    LOG_INFO("Compare request received", user_id=getattr(request, "user_id", "anonymous"))
+
+    try:
+        data = await request.json()
+    except Exception:
+        return {
+            "status": "ERROR",
+            "error": "Invalid JSON in request body",
+            "error_code": "INVALID_JSON",
+        }, status.HTTP_400_BAD_REQUEST
+
+    if not isinstance(data, dict):
+        return {
+            "status": "ERROR",
+            "error": "Request body must be a JSON object",
+            "error_code": "INVALID_JSON",
+        }, status.HTTP_400_BAD_REQUEST
+
+    is_valid, errors, sanitized_data = validate_comparison_request(data)
+
+    if not is_valid or sanitized_data is None:
+        LOG_WARNING("Invalid request", errors=errors, user_id=getattr(request, "user_id", "anonymous"))
+        METRICS.increment("compare.validation_error")
+        return {
+            "status": "ERROR",
+            "error": "Validation failed",
+            "error_code": "VALIDATION_ERROR",
+            "details": errors,
+        }, status.HTTP_400_BAD_REQUEST
+
+    category = sanitized_data["category"]
+    constraints = sanitized_data["constraints"] or None
+
+    LOG_INFO(
+        "Processing comparison",
+        category=category,
+        constraints=constraints,
+        user_id=getattr(request, "user_id", "anonymous"),
+    )
+
+    METRICS.increment("compare.request", category=category.replace(" ", "_"))
+
+    comparison_start = time.time()
+
+    try:
+        result = await run_full_comparison_with_caching(category, constraints)
+        comparison_duration = time.time() - comparison_start
+        searches_used = result.stats.api_calls
+
+        track_request_cost(getattr(request, "user_id", "anonymous"), searches_used, comparison_duration)
+
+        LOG_INFO(
+            "Comparison successful",
+            user_id=getattr(request, "user_id", "anonymous"),
+            category=category,
+            products=len(result.products),
+            searches=searches_used,
+            duration=comparison_duration,
+            from_cache=result.cached_result,
+        )
+
+        METRICS.increment("compare.success", from_cache=str(result.cached_result))
+
+        payload = _comparison_response_to_payload(result)
+        return payload, status.HTTP_200_OK
+
+    except WorkflowBudgetExceeded as exc:
+        LOG_ERROR(
+            "Search budget exceeded",
+            user_id=getattr(request, "user_id", "anonymous"),
+            category=category,
+            error=str(exc),
+        )
+        METRICS.increment("compare.budget_exceeded")
+        return {
+            "status": "ERROR",
+            "error": "Search budget exceeded",
+            "error_code": "BUDGET_EXCEEDED",
+            "message": "Too many searches required for this query",
+        }, status.HTTP_503_SERVICE_UNAVAILABLE
+
+    except ValueError as exc:
+        LOG_ERROR(
+            "Comparison validation failure",
+            user_id=getattr(request, "user_id", "anonymous"),
+            category=category,
+            error=str(exc),
+        )
+        METRICS.increment("compare.pipeline_error", error_code="validation_error")
+        return {
+            "status": "ERROR",
+            "error": str(exc),
+            "error_code": "VALIDATION_ERROR",
+        }, status.HTTP_400_BAD_REQUEST
+
+    except Exception as exc:
+        LOG_ERROR(
+            "Compare endpoint exception",
+            user_id=getattr(request, "user_id", "anonymous"),
+            category=category,
+            error=str(exc),
+            traceback=traceback.format_exc(),
+        )
+        METRICS.increment("compare.exception")
+        return {
+            "status": "ERROR",
+            "error": "Internal server error",
+            "error_code": "INTERNAL_ERROR",
+        }, status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+@endpoint_wrapper(requires_auth=False)
+async def health_endpoint(request: Request) -> tuple[dict[str, Any], int]:
+    """GET /health: lightweight health signal for load balancers."""
+
+    return health_check()
+
+
+@endpoint_wrapper(requires_auth=False)
+async def readiness_endpoint(request: Request) -> tuple[dict[str, Any], int]:
+    """GET /ready: readiness probe for orchestration."""
+
+    return readiness_check()
+
+
+@endpoint_wrapper(requires_auth=False)
+async def metrics_endpoint(request: Request) -> Response:
+    """GET /metrics: Prometheus scrape endpoint."""
+
+    content = prometheus_client.generate_latest().decode("utf-8")
+    response = PlainTextResponse(content=content, media_type="text/plain; version=0.0.4; charset=utf-8")
+    return response
+
+
+# =============================================================================
+# ADMIN HELPERS
+# =============================================================================
+
+
+def _normalize_cache_identifier(value: str | None) -> str:
+    """Normalize identifiers for consistent cache key generation."""
+
+    if not value:
+        return ""
+    cleaned = re.sub(r"[^a-z0-9]+", "_", value.lower())
+    return cleaned.strip("_")
+
+
+def generate_product_cache_key(product_id: str | None, product_name: str) -> list[str]:
+    """Return all Redis keys that may store product data for the provided identifiers."""
+
+    patterns: list[str] = []
+    normalized_name = _normalize_cache_identifier(product_name)
+    if normalized_name:
+        patterns.append(f"product:{normalized_name}:*")
+
+    normalized_id = _normalize_cache_identifier(product_id)
+    if normalized_id:
+        patterns.append(f"product:{normalized_id}:*")
+
+    keys: list[str] = []
+    for pattern in patterns:
+        keys.extend(list(raw_redis_connection.scan_iter(match=pattern, count=1000)))
+    # Deduplicate while preserving discovery order.
+    return list(dict.fromkeys(keys))
+
+
+def generate_alias_key(product_name: str) -> str:
+    """Alias keys allow quick lookup by product display name."""
+
+    normalized = _normalize_cache_identifier(product_name)
+    return f"alias:{normalized}" if normalized else ""
+
+
+def generate_query_cache_key(category: str, constraints: str | None) -> str:
+    """Produce the same cache key used by the orchestrator for comparison responses."""
+
+    normalized_category = category.lower().strip()
+    normalized_constraints = (constraints or "").lower().strip()
+    hashed = sha256_hash(f"{normalized_category}|{normalized_constraints}")
+    return f"comparison:{hashed}"
+
+
+async def _delete_keys(keys: list[str]) -> int:
+    """Delete multiple Redis keys in a background thread."""
+
+    if not keys:
+        return 0
+    return await asyncio.to_thread(lambda: raw_redis_connection.delete(*keys))
+
+
+async def _count_keys(pattern: str) -> int:
+    """Count Redis keys matching a pattern without blocking the event loop."""
+
+    return await asyncio.to_thread(lambda: sum(1 for _ in raw_redis_connection.scan_iter(match=pattern, count=1000)))
+
+
+# =============================================================================
+# ADMIN ENDPOINTS
+# =============================================================================
+
+
+@endpoint_wrapper(requires_auth=True, requires_admin=True)
+async def admin_invalidate_product_cache(request: Request) -> tuple[dict[str, Any], int]:
+    """POST /admin/cache/invalidate/product: remove cached product entries."""
+
+    try:
+        data = await request.json()
+    except Exception:
+        return {
+            "status": "ERROR",
+            "error": "Invalid JSON in request body",
+            "error_code": "INVALID_JSON",
+        }, status.HTTP_400_BAD_REQUEST
+
+    if not isinstance(data, dict):
+        return {
+            "status": "ERROR",
+            "error": "Request body must be a JSON object",
+            "error_code": "INVALID_JSON",
+        }, status.HTTP_400_BAD_REQUEST
+
+    if "product_id" not in data or "product_name" not in data:
+        return {
+            "status": "ERROR",
+            "error": "Missing required fields: product_id, product_name",
+        }, status.HTTP_400_BAD_REQUEST
+
+    product_id = str(data.get("product_id", "")).strip() or None
+    product_name = str(data.get("product_name", "")).strip()
+
+    LOG_INFO(
+        "Admin invalidating product cache",
+        admin_user=getattr(request, "user_id", "unknown_admin"),
+        product_id=product_id,
+        product=product_name,
+    )
+
+    keys = await asyncio.to_thread(generate_product_cache_key, product_id, product_name)
+    deleted_primary = await _delete_keys(keys)
+
+    alias_key = generate_alias_key(product_name)
+    deleted_alias = await asyncio.to_thread(raw_redis_connection.delete, alias_key) if alias_key else 0
+
+    if deleted_primary or deleted_alias:
+        LOG_INFO(
+            "Product cache invalidated",
+            product_id=product_id,
+            product=product_name,
+            deleted_primary=deleted_primary,
+            deleted_alias=deleted_alias,
+        )
+        METRICS.increment("admin.cache.invalidate.success")
+        return {
+            "status": "SUCCESS",
+            "message": "Product will be re-indexed on next comparison",
+            "deleted_keys": {
+                "primary": deleted_primary,
+                "alias": deleted_alias,
+            },
+        }, status.HTTP_200_OK
+
+    LOG_INFO("Product not found in cache", product_id=product_id, product=product_name)
+    METRICS.increment("admin.cache.invalidate.not_found")
+    return {
+        "status": "NOT_FOUND",
+        "message": "Product not in cache",
+    }, status.HTTP_404_NOT_FOUND
+
+
+@endpoint_wrapper(requires_auth=True, requires_admin=True)
+async def admin_invalidate_query_cache(request: Request) -> tuple[dict[str, Any], int]:
+    """POST /admin/cache/invalidate/query: remove cached comparison results."""
+
+    try:
+        data = await request.json()
+    except Exception:
+        return {
+            "status": "ERROR",
+            "error": "Invalid JSON in request body",
+            "error_code": "INVALID_JSON",
+        }, status.HTTP_400_BAD_REQUEST
+
+    if not isinstance(data, dict):
+        return {
+            "status": "ERROR",
+            "error": "Request body must be a JSON object",
+            "error_code": "INVALID_JSON",
+        }, status.HTTP_400_BAD_REQUEST
+
+    if "category" not in data:
+        return {
+            "status": "ERROR",
+            "error": "Missing required field: category",
+        }, status.HTTP_400_BAD_REQUEST
+
+    category = str(data.get("category", "")).strip()
+    constraints = str(data.get("constraints", "")).strip() or None
+
+    LOG_INFO(
+        "Admin invalidating query cache",
+        admin_user=getattr(request, "user_id", "unknown_admin"),
+        category=category,
+        constraints=constraints,
+    )
+
+    key = generate_query_cache_key(category, constraints)
+    deleted = await asyncio.to_thread(raw_redis_connection.delete, key)
+
+    if deleted:
+        LOG_INFO("Query cache invalidated", category=category, constraints=constraints)
+        METRICS.increment("admin.cache.invalidate.query.success")
+        return {
+            "status": "SUCCESS",
+            "message": "Query cache invalidated",
+        }, status.HTTP_200_OK
+
+    LOG_INFO("Query not found in cache", category=category, constraints=constraints)
+    METRICS.increment("admin.cache.invalidate.query.not_found")
+    return {
+        "status": "NOT_FOUND",
+        "message": "Query not in cache",
+    }, status.HTTP_404_NOT_FOUND
+
+
+@endpoint_wrapper(requires_auth=True, requires_admin=True)
+async def admin_cache_stats(request: Request) -> tuple[dict[str, Any], int]:
+    """GET /admin/cache/stats: provide cache inventory and Redis memory usage."""
+
+    LOG_INFO("Admin requesting cache stats", admin_user=getattr(request, "user_id", "unknown_admin"))
+
+    try:
+        query_count, product_count, alias_count = await asyncio.gather(
+            _count_keys("comparison:*"),
+            _count_keys("product:*"),
+            _count_keys("alias:*"),
+        )
+
+        redis_info = await asyncio.to_thread(raw_redis_connection.info, "memory")
+
+        stats = {
+            "cache_counts": {
+                "queries": query_count,
+                "products": product_count,
+                "aliases": alias_count,
+                "total": query_count + product_count + alias_count,
+            },
+            "redis_memory": {
+                "used_memory_human": redis_info.get("used_memory_human", "unknown"),
+                "used_memory_peak_human": redis_info.get("used_memory_peak_human", "unknown"),
+                "maxmemory_human": redis_info.get("maxmemory_human", "not set"),
+                "used_memory_bytes": redis_info.get("used_memory", 0),
+            },
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        METRICS.increment("admin.cache.stats.success")
+        return stats, status.HTTP_200_OK
+
+    except Exception as exc:
+        LOG_ERROR("Failed to get cache stats", error=str(exc), admin_user=getattr(request, "user_id", "unknown_admin"))
+        METRICS.increment("admin.cache.stats.error")
+        return {
+            "status": "ERROR",
+            "error": "Failed to retrieve cache stats",
+            "details": str(exc),
+        }, status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+@endpoint_wrapper(requires_auth=True, requires_admin=True)
+async def admin_trigger_price_refresh(request: Request) -> tuple[dict[str, Any], int]:
+    """POST /admin/jobs/trigger/price-refresh: manually start the price refresh job."""
+
+    LOG_INFO("Admin triggering price refresh", admin_user=getattr(request, "user_id", "unknown_admin"))
+
+    try:
+        thread = threading.Thread(target=refresh_product_prices, name="price-refresh-manual", daemon=True)
+        thread.start()
+
+        METRICS.increment("admin.jobs.price_refresh.triggered")
+
+        return {
+            "status": "SUCCESS",
+            "message": "Price refresh job triggered",
+            "note": "Job is running asynchronously",
+        }, status.HTTP_200_OK
+
+    except Exception as exc:
+        LOG_ERROR("Failed to trigger price refresh", error=str(exc), admin_user=getattr(request, "user_id", "unknown_admin"))
+        return {
+            "status": "ERROR",
+            "error": "Failed to trigger job",
+            "details": str(exc),
+        }, status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+# =============================================================================
+# ERROR HANDLERS
+# =============================================================================
+
+
+def handle_404(_: Exception) -> tuple[dict[str, str], int]:
+    """Return a consistent 404 error payload."""
+
+    return {
+        "status": "ERROR",
+        "error": "Endpoint not found",
+        "error_code": "NOT_FOUND",
+    }, status.HTTP_404_NOT_FOUND
+
+
+def handle_405(_: Exception) -> tuple[dict[str, str], int]:
+    """Return a consistent 405 error payload."""
+
+    return {
+        "status": "ERROR",
+        "error": "Method not allowed",
+        "error_code": "METHOD_NOT_ALLOWED",
+    }, status.HTTP_405_METHOD_NOT_ALLOWED
+
+
+def handle_500(error: Exception) -> tuple[dict[str, str], int]:
+    """Return a consistent 500 error payload."""
+
+    LOG_ERROR("Unhandled error", error=str(error))
+    return {
+        "status": "ERROR",
+        "error": "Internal server error",
+        "error_code": "INTERNAL_ERROR",
+    }, status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+async def _http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Translate Starlette HTTP exceptions into our JSON envelope."""
+
+    if exc.status_code == status.HTTP_404_NOT_FOUND:
+        body, status_code = handle_404(exc)
+    elif exc.status_code == status.HTTP_405_METHOD_NOT_ALLOWED:
+        body, status_code = handle_405(exc)
+    else:
+        body = {
+            "status": "ERROR",
+            "error": exc.detail or "HTTP error",
+            "error_code": "HTTP_ERROR",
+        }
+        status_code = exc.status_code
+
+    body["request_id"] = generate_request_id()
+    response = JSONResponse(content=body, status_code=status_code)
+    response.headers["X-Request-ID"] = body["request_id"]
+    return response
+
+
+async def _validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Handle FastAPI request validation errors with descriptive feedback."""
+
+    request_id = generate_request_id()
+    payload = {
+        "status": "ERROR",
+        "error": "Validation failed",
+        "error_code": "VALIDATION_ERROR",
+        "details": exc.errors(),
+        "request_id": request_id,
+    }
+    response = JSONResponse(content=payload, status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all handler to ensure we always respond with JSON."""
+
+    request_id = generate_request_id()
+    LOG_ERROR(
+        "Unhandled exception",
+        request_id=request_id,
+        error=str(exc),
+        traceback=traceback.format_exc(),
+    )
+    body, status_code = handle_500(exc)
+    body["request_id"] = request_id
+    if CONFIG["DEBUG"]:
+        body["error_details"] = str(exc)
+    response = JSONResponse(content=body, status_code=status_code)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+# =============================================================================
+# SERVER INITIALIZATION
+# =============================================================================
+
+
+def create_app() -> FastAPI:
+    """Create and configure the FastAPI application."""
+
+    app = FastAPI(title="Comparoo Backend", version="1.0.0")
+    router = APIRouter()
+
+    # Public routes
+    router.add_api_route("/api/v1/compare", compare_endpoint, methods=["POST", "OPTIONS"], include_in_schema=True)
+    router.add_api_route("/health", health_endpoint, methods=["GET"], include_in_schema=False)
+    router.add_api_route("/ready", readiness_endpoint, methods=["GET"], include_in_schema=False)
+    router.add_api_route("/metrics", metrics_endpoint, methods=["GET"], include_in_schema=False)
+
+    # Admin routes
+    router.add_api_route(
+        "/admin/cache/invalidate/product",
+        admin_invalidate_product_cache,
+        methods=["POST"],
+        include_in_schema=False,
+    )
+    router.add_api_route(
+        "/admin/cache/invalidate/query",
+        admin_invalidate_query_cache,
+        methods=["POST"],
+        include_in_schema=False,
+    )
+    router.add_api_route(
+        "/admin/cache/stats",
+        admin_cache_stats,
+        methods=["GET"],
+        include_in_schema=False,
+    )
+    router.add_api_route(
+        "/admin/jobs/trigger/price-refresh",
+        admin_trigger_price_refresh,
+        methods=["POST"],
+        include_in_schema=False,
+    )
+
+    app.include_router(router)
+
+    @app.on_event("startup")
+    async def _on_startup() -> None:
+        startup()
+
+    @app.on_event("shutdown")
+    async def _on_shutdown() -> None:
+        shutdown()
+
+    app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
+    app.add_exception_handler(RequestValidationError, _validation_exception_handler)
+    app.add_exception_handler(Exception, _unhandled_exception_handler)
+
+    return app
+
+
+# =============================================================================
+# MAIN ENTRY POINT
+# =============================================================================
+
+
+if __name__ == "__main__":
+    application = create_app()
+    LOG_INFO("Starting server", host=CONFIG["HOST"], port=CONFIG["PORT"], workers=CONFIG["WORKERS"])
+
+    try:
+        import uvicorn
+
+        uvicorn.run(
+            application,
+            host=CONFIG["HOST"],
+            port=CONFIG["PORT"],
+            workers=CONFIG["WORKERS"],
+            reload=CONFIG["DEBUG"],
+        )
+    except ModuleNotFoundError:  # pragma: no cover - uvicorn optional in some envs
+        LOG_ERROR("uvicorn is required to run the server directly. Please install uvicorn or use a WSGI server.")
