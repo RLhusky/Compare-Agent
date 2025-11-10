@@ -28,6 +28,7 @@ class MetricsResult(BaseModel):
 class CandidateProduct(BaseModel):
     """Product discovered from Step 2/3 searches."""
 
+    product_id: str | None = None
     name: str
     source: str | None = None
     source_url: AnyHttpUrl | None = None
@@ -94,6 +95,7 @@ class ComparisonResponse(BaseModel):
 class ProductExtraction(BaseModel):
     """Structured product data produced in Step 4."""
 
+    product_id: str | None = None
     name: str
     image_url: AnyHttpUrl
     link: AnyHttpUrl

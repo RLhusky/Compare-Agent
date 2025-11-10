@@ -16,6 +16,13 @@ class Settings(BaseSettings):
 
     env: Literal["development", "staging", "production"] = Field(default="development")
 
+    # Perplexity / Sonar configuration
+    perplexity_api_key: str = Field(default="", validation_alias="PERPLEXITY_API_KEY")
+    perplexity_base_url: str = Field(default="https://api.perplexity.ai", validation_alias="PERPLEXITY_BASE_URL")
+    sonar_model: str = Field(default="sonar", validation_alias="SONAR_MODEL")
+    sonar_timeout_seconds: float = Field(default=15.0, validation_alias="SONAR_TIMEOUT_SECONDS")
+    sonar_max_retries: int = Field(default=3, validation_alias="SONAR_MAX_RETRIES")
+
     # Grok API configuration
     grok_api_key: str = Field(default="", validation_alias="GROK_API_KEY")
     grok_base_url: str = Field(default="https://api.x.ai/v1", validation_alias="GROK_BASE_URL")
@@ -29,6 +36,9 @@ class Settings(BaseSettings):
     step_timeout_seconds: float = Field(default=15.0)
     extraction_timeout_seconds: float = Field(default=8.0)
     extraction_max_concurrency: int = Field(default=5)
+    a1_search_budget: int = Field(default=10, validation_alias="A1_SEARCH_BUDGET")
+    b_search_budget_per_agent: int = Field(default=4, validation_alias="B_SEARCH_BUDGET_PER_AGENT")
+    max_total_searches: int = Field(default=40, validation_alias="MAX_TOTAL_SEARCHES")
 
     # Cache configuration
     redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")

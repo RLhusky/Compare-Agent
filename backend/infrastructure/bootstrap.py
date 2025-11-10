@@ -130,6 +130,9 @@ def load_config() -> dict[str, Any]:
     config["API_REQUEST_TIMEOUT"] = _int_from_env(load_from_env("API_REQUEST_TIMEOUT", "30"), "API_REQUEST_TIMEOUT")
     config["API_MAX_RETRIES"] = _int_from_env(load_from_env("API_MAX_RETRIES", "3"), "API_MAX_RETRIES")
     config["API_BACKOFF_FACTOR"] = _float_from_env(load_from_env("API_BACKOFF_FACTOR", "2"), "API_BACKOFF_FACTOR")
+    config["SONAR_MODEL"] = load_from_env("SONAR_MODEL", "sonar")
+    config["SONAR_TIMEOUT_SECONDS"] = _float_from_env(load_from_env("SONAR_TIMEOUT_SECONDS", "15"), "SONAR_TIMEOUT_SECONDS")
+    config["SONAR_MAX_RETRIES"] = _int_from_env(load_from_env("SONAR_MAX_RETRIES", "3"), "SONAR_MAX_RETRIES")
 
     # Authentication
     config["API_KEY_HEADER"] = load_from_env("API_KEY_HEADER", "X-API-Key")
@@ -727,6 +730,9 @@ GROK_API_KEY=your_grok_key_here
 # API Configuration
 PERPLEXITY_BASE_URL=https://api.perplexity.ai
 GROK_BASE_URL=https://api.x.ai/v1
+SONAR_MODEL=sonar
+SONAR_TIMEOUT_SECONDS=15
+SONAR_MAX_RETRIES=3
 API_REQUEST_TIMEOUT=30
 API_MAX_RETRIES=3
 

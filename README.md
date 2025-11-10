@@ -62,30 +62,27 @@ You can think of the file as a well-organised playbook: every helper builds towa
   - Deploy to a staging environment, run load tests, and confirm observability dashboards (Prometheus, logs) capture the right signals.
   - Update operational runbooks with the new admin endpoints and failure recovery steps.
 
-## Six-Step Workflow
-1. **Metric Discovery** (`grok-4-fast-reasoning`)  
-   Cached per category for 90 days to minimize reasoning calls.
-2. **Ranking Site Harvesting** (`grok-4-fast-reasoning` + search)  
-   Targets Wirecutter, RTINGS, Consumer Reports, etc.
-3. **Fallback Discovery** (`grok-4-fast-reasoning` + search)  
-   Deterministic strategies (bestsellers, Amazon, Reddit, forums).
-4. **Product Extraction** (`grok-4-fast-non-reasoning`, parallel ≤5)  
-   Mandatory fields enforced; cache refreshed every 12 hours.
-5. **Comparison Generation** (`grok-4-fast-reasoning`)  
-   Produces markdown analysis covering metrics, strengths, recommendations.
-6. **Display Formatting** (`grok-4-fast-non-reasoning`)  
-   Returns structured JSON for UI cards and metric tables.
+## Sonar + Grok Workflow
+1. **Sonar Agent A1 – Discovery & Validation**  
+   Single prompt validates the request, produces comparison metrics, and returns exactly six candidate products. Results are cached by category.
+2. **Sonar Agent B – Parallel Product Research**  
+   Up to six Sonar agents run concurrently to gather pricing, links, summaries, pros/cons, and detailed reviews. Image search is executed as a dedicated Sonar step when needed. Outputs are cached per product per day.
+3. **Grok Agent C – Ranking & Table Synthesis**  
+   Grok 4 Fast Reasoning turns the research corpus into star ratings, rankings, and a comparison table ready for the frontend (with optional TL;DR text).
 
-Compute budgets are enforced end-to-end (`MAX_API_CALLS=8`, `workflow_timeout≤32s`).
+Compute budgets are enforced end-to-end (`MAX_TOTAL_SEARCHES`, `A1_SEARCH_BUDGET`, `B_SEARCH_BUDGET_PER_AGENT`, and `workflow_timeout≤32s`).
 
 ## Configuration
 All settings are defined in `config.py` (Pydantic BaseSettings).  
 Environment variables (with defaults) include:
 
 - `GROK_API_KEY` / `GROK_BASE_URL`
+- `PERPLEXITY_API_KEY` / `PERPLEXITY_BASE_URL` (Sonar)
+- `SONAR_MODEL`, `SONAR_TIMEOUT_SECONDS`, `SONAR_MAX_RETRIES`
 - `REDIS_URL`
 - `MAX_API_CALLS_PER_COMPARISON`
 - `WORKFLOW_TIMEOUT_SECONDS`, `STEP_TIMEOUT_SECONDS`
+- `MAX_TOTAL_SEARCHES`, `A1_SEARCH_BUDGET`, `B_SEARCH_BUDGET_PER_AGENT`
 - `EXTRACTION_MAX_CONCURRENCY`, `EXTRACTION_TIMEOUT_SECONDS`
 - TTL values for metrics, products, and comparison caches
 - Logging mode (`LOG_JSON`, `LOG_LEVEL`)
