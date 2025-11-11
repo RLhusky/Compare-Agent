@@ -1,12 +1,41 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import type { ChangeEvent, FormEvent, MouseEvent, ReactNode } from 'react';
 import { Search, SlidersHorizontal } from 'lucide-react';
 import { Header } from './Header';
 import { Footer } from './Footer';
 import { SearchLoadingState } from './SearchLoadingState';
 import { SearchProductCard } from './SearchProductCard';
 import { FilterSidebar } from './FilterSidebar';
+import { ErrorDisplay } from './ErrorDisplay';
+import { ApiError, ComparisonResponse, compareProducts } from '../lib/api';
+
+type LoadingStatus = 'pending' | 'loading' | 'complete';
+
+interface LoadingStepsState {
+  scanning: LoadingStatus;
+  analyzing: LoadingStatus;
+  ranking: LoadingStatus;
+  finalizing: LoadingStatus;
+}
+
+interface CardProduct {
+  id: number;
+  name: string;
+  image: string;
+  rating: number;
+  price: string;
+  description: string;
+  label: 'Overall Pick' | null;
+}
+
+const DEFAULT_LOADING_STEPS: LoadingStepsState = {
+  scanning: 'pending',
+  analyzing: 'pending',
+  ranking: 'pending',
+  finalizing: 'pending',
+};
 
 interface SearchResultsPageProps {
   initialQuery: string;
@@ -16,207 +45,228 @@ export function SearchResultsPage({ initialQuery }: SearchResultsPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [displayedQuery, setDisplayedQuery] = useState(initialQuery);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [loadingSteps, setLoadingSteps] = useState<{
-    scanning: 'pending' | 'loading' | 'complete';
-    analyzing: 'pending' | 'loading' | 'complete';
-    ranking: 'pending' | 'loading' | 'complete';
-    finalizing: 'pending' | 'loading' | 'complete';
-  }>({
-    scanning: 'loading',
-    analyzing: 'pending',
-    ranking: 'pending',
-    finalizing: 'pending',
+  const [loadingSteps, setLoadingSteps] = useState<LoadingStepsState>({
+    ...DEFAULT_LOADING_STEPS,
+    scanning: initialQuery.trim() ? 'loading' : 'pending',
   });
-  const [showResults, setShowResults] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [currentModalIndex, setCurrentModalIndex] = useState(0);
+  const [progress, setProgress] = useState<number>(0);
+  const [, setCurrentModalIndex] = useState<number>(0);
+  const [comparisonData, setComparisonData] = useState<ComparisonResponse | null>(null);
+  const [loading, setLoading] = useState(Boolean(initialQuery.trim()));
+  const [error, setError] = useState<ApiError | Error | null>(null);
 
-  // Mock products data - in real app this would come from backend
-  const products = [
-    {
-      id: 1,
-      name: 'Sony WH-1000XM5',
-      image: 'https://images.unsplash.com/photo-1546435770-a3e426bf472b?w=400',
-      rating: 4.8,
-      price: '$399',
-      description: 'Industry-leading noise cancellation with exceptional sound quality and all-day comfort.',
-      label: 'Overall Pick' as const,
-    },
-    {
-      id: 2,
-      name: 'Anker Soundcore Q30',
-      image: 'https://images.unsplash.com/photo-1484704849700-f032a568e944?w=400',
-      rating: 4.5,
-      price: '$79',
-      description: 'Budget-friendly option with impressive noise cancellation and 40-hour battery life.',
-      label: null,
-    },
-    {
-      id: 3,
-      name: 'Bose QuietComfort Ultra',
-      image: 'https://images.unsplash.com/photo-1545127398-14699f92334b?w=400',
-      rating: 4.7,
-      price: '$429',
-      description: 'Premium spatial audio with CustomTune technology for personalized sound.',
-      label: null,
-    },
-    {
-      id: 4,
-      name: 'Sennheiser Momentum 4',
-      image: 'https://images.unsplash.com/photo-1487215078519-e21cc028cb29?w=400',
-      rating: 4.6,
-      price: '$349',
-      description: 'Audiophile-grade sound with adaptive noise cancellation and 60-hour battery.',
-      label: null,
-    },
-    {
-      id: 5,
-      name: 'Apple AirPods Max',
-      image: 'https://images.unsplash.com/photo-1606841837239-c5a1a4a07af7?w=400',
-      rating: 4.4,
-      price: '$549',
-      description: 'Seamless Apple ecosystem integration with computational audio.',
-      label: null,
-    },
-    {
-      id: 6,
-      name: 'JBL Tune 760NC',
-      image: 'https://images.unsplash.com/photo-1577174881658-0f30157f72fd?w=400',
-      rating: 4.3,
-      price: '$129',
-      description: 'Great everyday headphones with active noise cancellation and JBL Pure Bass.',
-      label: null,
-    },
-  ];
+  const animationFrameRef = useRef<number | null>(null);
+  const requestIdRef = useRef(0);
 
-  // Smooth continuous progress bar - updates every frame for buttery smooth animation
-  useEffect(() => {
-    const timers: NodeJS.Timeout[] = [];
-    let animationFrameId: number;
-    const startTime = performance.now();
-    const duration = 10000; // 10 seconds total
-    
-    const animate = (currentTime: number) => {
-      const elapsed = currentTime - startTime;
-      const progressPercent = Math.min((elapsed / duration) * 100, 100);
-      
-      // Update progress on every frame for maximum smoothness
-      setProgress(progressPercent);
-      
-      if (progressPercent < 100) {
-        animationFrameId = requestAnimationFrame(animate);
-      } else {
-        setProgress(100);
-      }
-    };
-    
-    animationFrameId = requestAnimationFrame(animate);
-    
-    // Mark checkpoints as complete at specific times
-    // Checkpoint 1: Complete scanning at 25% (after ~2.5 seconds)
-    timers.push(setTimeout(() => {
-      setLoadingSteps(prev => ({ ...prev, scanning: 'complete', analyzing: 'loading' }));
-    }, 2500));
-    
-    // Checkpoint 2: Complete analyzing at 50% (after ~5 seconds total)
-    timers.push(setTimeout(() => {
-      setLoadingSteps(prev => ({ ...prev, analyzing: 'complete', ranking: 'loading' }));
-    }, 5000));
-    
-    // Checkpoint 3: Complete ranking at 75% (after ~7.5 seconds total)
-    timers.push(setTimeout(() => {
-      setLoadingSteps(prev => ({ ...prev, ranking: 'complete', finalizing: 'loading' }));
-    }, 7500));
-    
-    // Checkpoint 4: Complete finalizing at 100% (after ~10 seconds total)
-    timers.push(setTimeout(() => {
-      setLoadingSteps(prev => ({ ...prev, finalizing: 'complete' }));
-      setShowResults(true);
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-      }
-    }, 10000));
-
-    return () => {
-      timers.forEach(timer => clearTimeout(timer));
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-      }
-    };
+  const cancelProgressAnimation = useCallback(() => {
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
   }, []);
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-    
-    // Update displayed query and clear input
-    setDisplayedQuery(searchQuery);
-    setSearchQuery('');
-    
-    // Reset and restart search
-    setShowResults(false);
-    setLoadingSteps({
-      scanning: 'loading',
-      analyzing: 'pending',
-      ranking: 'pending',
-      finalizing: 'pending',
-    });
-    setProgress(0);
-    
-    // Restart loading sequence with smooth continuous progress
-    const timers: NodeJS.Timeout[] = [];
-    let animationFrameId: number;
-    const startTime = performance.now();
-    const duration = 10000; // 10 seconds total
-    
-    const animate = (currentTime: number) => {
-      const elapsed = currentTime - startTime;
-      const progressPercent = Math.min((elapsed / duration) * 100, 100);
-      
-      // Update progress on every frame for maximum smoothness
-      setProgress(progressPercent);
-      
-      if (progressPercent < 100) {
-        animationFrameId = requestAnimationFrame(animate);
-      } else {
-        setProgress(100);
-      }
-    };
-    
-    animationFrameId = requestAnimationFrame(animate);
-    
-    // Mark checkpoints as complete at specific times
-    // Checkpoint 1: Complete scanning at 25% (after ~2.5 seconds)
-    timers.push(setTimeout(() => {
-      setLoadingSteps(prev => ({ ...prev, scanning: 'complete', analyzing: 'loading' }));
-    }, 2500));
-    
-    // Checkpoint 2: Complete analyzing at 50% (after ~5 seconds total)
-    timers.push(setTimeout(() => {
-      setLoadingSteps(prev => ({ ...prev, analyzing: 'complete', ranking: 'loading' }));
-    }, 5000));
-    
-    // Checkpoint 3: Complete ranking at 75% (after ~7.5 seconds total)
-    timers.push(setTimeout(() => {
-      setLoadingSteps(prev => ({ ...prev, ranking: 'complete', finalizing: 'loading' }));
-    }, 7500));
-    
-    // Checkpoint 4: Complete finalizing at 100% (after ~10 seconds total)
-    timers.push(setTimeout(() => {
-      setLoadingSteps(prev => ({ ...prev, finalizing: 'complete' }));
-      setShowResults(true);
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-      }
-    }, 10000));
+  const startProgressAnimation = useCallback(() => {
+    cancelProgressAnimation();
+    setProgress(5);
 
-    return () => {
-      timers.forEach(timer => clearTimeout(timer));
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
+    const step = () => {
+      let nextValue = 0;
+      setProgress((prev: number) => {
+        const increment = Math.max(0.5, (90 - prev) * 0.05);
+        nextValue = Math.min(prev + increment, 90);
+        return nextValue;
+      });
+
+      if (nextValue < 90) {
+        animationFrameRef.current = requestAnimationFrame(step);
+      } else {
+        animationFrameRef.current = null;
       }
     };
+
+    animationFrameRef.current = requestAnimationFrame(step);
+  }, [cancelProgressAnimation]);
+
+  const finishProgressAnimation = useCallback(() => {
+    cancelProgressAnimation();
+    setProgress(100);
+  }, [cancelProgressAnimation]);
+
+  useEffect(() => {
+    return () => {
+      cancelProgressAnimation();
+    };
+  }, [cancelProgressAnimation]);
+
+  const parseRating = useCallback((value: string) => {
+    const match = value.match(/[\d.]+/);
+    if (!match) {
+      return 0;
+    }
+
+    const parsed = parseFloat(match[0]);
+    if (!Number.isFinite(parsed)) {
+      return 0;
+    }
+
+    return Math.max(0, Math.min(parsed, 5));
+  }, []);
+
+  const executeSearch = useCallback(
+    async (query: string) => {
+      const trimmed = query.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      const requestId = ++requestIdRef.current;
+      setSearchQuery('');
+      setDisplayedQuery(trimmed);
+      setCurrentModalIndex(0);
+      setComparisonData(null);
+      setError(null);
+      setLoading(true);
+      setLoadingSteps({
+        scanning: 'loading',
+        analyzing: 'pending',
+        ranking: 'pending',
+        finalizing: 'pending',
+      });
+      startProgressAnimation();
+
+      try {
+        const response = await compareProducts(trimmed);
+
+        if (requestIdRef.current !== requestId) {
+          return;
+        }
+
+        setComparisonData(response);
+        setLoadingSteps({
+          scanning: 'complete',
+          analyzing: 'complete',
+          ranking: 'complete',
+          finalizing: 'complete',
+        });
+      } catch (err) {
+        if (requestIdRef.current !== requestId) {
+          return;
+        }
+
+        const apiError =
+          err instanceof ApiError
+            ? err
+            : new ApiError('Unexpected error while fetching comparison results.', {
+                details: err,
+              });
+
+        setError(apiError);
+        setLoadingSteps({
+          ...DEFAULT_LOADING_STEPS,
+          scanning: 'complete',
+        });
+      } finally {
+        if (requestIdRef.current === requestId) {
+          finishProgressAnimation();
+          setLoading(false);
+        }
+      }
+    },
+    [finishProgressAnimation, startProgressAnimation]
+  );
+
+  useEffect(() => {
+    if (initialQuery.trim()) {
+      executeSearch(initialQuery);
+    } else {
+      setLoading(false);
+      setLoadingSteps(DEFAULT_LOADING_STEPS);
+    }
+  }, [initialQuery, executeSearch]);
+
+  const handleSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!searchQuery.trim() || loading) {
+      return;
+    }
+
+    executeSearch(searchQuery);
   };
+
+  const cardProducts: CardProduct[] = useMemo(() => {
+    if (!comparisonData) {
+      return [];
+    }
+
+    return comparisonData.products.map((product, index): CardProduct => ({
+      id: index,
+      name: product.name,
+      image: product.image_url || '',
+      rating: parseRating(product.rating),
+      price: '—',
+      description: product.description,
+      label: index === 0 ? 'Overall Pick' : null,
+    }));
+  }, [comparisonData, parseRating]);
+
+  const shouldShowResults = !loading && !error && cardProducts.length > 0;
+  const shouldShowLoading = loading;
+  const shouldShowEmptyState = !loading && !error && comparisonData && cardProducts.length === 0;
+  const shouldShowSearchBar = shouldShowResults || !!error || shouldShowEmptyState;
+
+  const handleRetry = useCallback(() => {
+    if (!displayedQuery.trim() || loading) {
+      return;
+    }
+    executeSearch(displayedQuery);
+  }, [displayedQuery, executeSearch, loading]);
+
+  const errorDetails: ReactNode = useMemo(() => {
+    if (!error) {
+      return null;
+    }
+
+    if (error instanceof ApiError) {
+      if (typeof error.details === 'string' && error.details.trim()) {
+        return (
+          <pre className="whitespace-pre-wrap break-words text-sm text-gray-600">
+            {error.details}
+          </pre>
+        );
+      }
+
+      if (error.details && typeof error.details === 'object') {
+        try {
+          return (
+            <pre className="whitespace-pre-wrap break-words text-sm text-gray-600">
+              {JSON.stringify(error.details, null, 2)}
+            </pre>
+          );
+        } catch (serializeError) {
+          const message =
+            serializeError instanceof Error
+              ? serializeError.message
+              : 'Unable to show additional details.';
+          return (
+            <span className="text-sm text-gray-600">
+              {message}
+            </span>
+          );
+        }
+      }
+    }
+
+    if (displayedQuery.trim()) {
+      return (
+        <div className="space-y-1 text-sm text-gray-600">
+          <p className="font-medium text-gray-700">Search query</p>
+          <p>{displayedQuery}</p>
+        </div>
+      );
+    }
+
+    return null;
+  }, [displayedQuery, error]);
 
   return (
     <div className="min-h-screen bg-white relative">
@@ -224,23 +274,28 @@ export function SearchResultsPage({ initialQuery }: SearchResultsPageProps) {
       
       <main className="max-w-6xl mx-auto px-4 py-8 pb-32">
         {/* Search Bar at Top - Centered - Only show when results are visible */}
-        {showResults && (
+        {shouldShowSearchBar && (
           <div className="mb-8 flex justify-center">
             <form onSubmit={handleSearch} className="relative flex gap-2 max-w-3xl w-full">
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)}
                 placeholder="Continue Comparing..."
                 className="flex-1 px-6 py-4 pr-14 rounded-2xl border border-white/40 bg-white/80 backdrop-blur-xl focus:border-emerald-500 focus:outline-none shadow-lg"
                 style={{ boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)' }}
               />
               <button
                 type="submit"
-                              className="absolute right-16 top-1/2 -translate-y-1/2 p-3 text-white rounded-xl transition-colors"
-                              style={{ backgroundColor: '#52B54B' }}
-                              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#469F40'}
-                              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#52B54B'}
+                className="absolute right-16 top-1/2 -translate-y-1/2 p-3 text-white rounded-xl transition-colors"
+                style={{ backgroundColor: '#52B54B' }}
+                onMouseEnter={(event: MouseEvent<HTMLButtonElement>) => {
+                  event.currentTarget.style.backgroundColor = '#469F40';
+                }}
+                onMouseLeave={(event: MouseEvent<HTMLButtonElement>) => {
+                  event.currentTarget.style.backgroundColor = '#52B54B';
+                }}
+                disabled={loading}
               >
                 <Search className="w-5 h-5" />
               </button>
@@ -258,7 +313,7 @@ export function SearchResultsPage({ initialQuery }: SearchResultsPageProps) {
         )}
 
         {/* Loading Steps */}
-        {!showResults && (
+        {shouldShowLoading && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)] -mt-8">
             <div className="max-w-4xl mx-auto w-full">
               <SearchLoadingState 
@@ -274,26 +329,46 @@ export function SearchResultsPage({ initialQuery }: SearchResultsPageProps) {
           </div>
         )}
 
-                    {/* Results Grid */}
-                    {showResults && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8 auto-rows-fr">
-                        {products.map((product, index) => (
-                          <SearchProductCard
-                            key={product.id}
-                            id={product.id}
-                            name={product.name}
-                            image={product.image}
-                            rating={product.rating}
-                            price={product.price}
-                            description={product.description}
-                            label={product.label}
-                            allProducts={products}
-                            currentIndex={index}
-                            onNavigate={setCurrentModalIndex}
-                          />
-                        ))}
-                      </div>
-                    )}
+        {error && (
+          <ErrorDisplay
+            message={error.message}
+            onRetry={loading ? undefined : handleRetry}
+            details={errorDetails}
+            retryLabel="Try Again"
+          />
+        )}
+
+        {shouldShowEmptyState && (
+          <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)] -mt-8">
+            <div className="text-center space-y-4">
+              <h2 className="text-2xl font-semibold text-gray-800">No products found</h2>
+              <p className="text-gray-600">
+                We couldn&apos;t find any products for &quot;{displayedQuery}&quot;. Try a different search query.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Results Grid */}
+        {shouldShowResults && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8 auto-rows-fr">
+            {cardProducts.map((product, index) => (
+              <SearchProductCard
+                key={product.id}
+                id={product.id}
+                name={product.name}
+                image={product.image}
+                rating={product.rating}
+                price={product.price}
+                description={product.description}
+                label={product.label}
+                allProducts={cardProducts}
+                currentIndex={index}
+                onNavigate={setCurrentModalIndex}
+              />
+            ))}
+          </div>
+        )}
       </main>
 
       {/* Filter Sidebar */}
