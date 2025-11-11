@@ -1,3 +1,5 @@
 # Exclude all JPEG files from the Cursor agent context and indexing
 *.jpeg
 *.jpg
+# Exclude all PNG files
+*.png
