@@ -153,9 +153,8 @@ Required structure:
             "rank": 1,
             "rating": 4.5,
             "product_id": "p1",
-            "product_title": "Apple MacBook Pro 14 M3",
-            "rationale": "Explanation of rating and rank...",
-            "best_for": "Professional users needing power + portability"
+            "product_title": "Apple MacBook Pro 14 M3"
+          
         }
     ],
     "summary": "1-2 sentence TLDR of the comparison."
