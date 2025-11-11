@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -174,12 +175,7 @@ def get_rate_limit_key(user_id: str, endpoint: str) -> str:
     return f"rate_limit:{user_id}:{endpoint}"
 
 
-def check_rate_limit(user_id: str, endpoint: str, max_requests: int, window_seconds: int) -> tuple[bool, int, int]:
-    """Check if a user has exceeded their rate limit."""
-
-    if not CONFIG["RATE_LIMIT_ENABLED"]:
-        return True, 999, 0
-
+def _check_rate_limit_sync(user_id: str, endpoint: str, max_requests: int, window_seconds: int) -> tuple[bool, int, int]:
     key = get_rate_limit_key(user_id, endpoint)
     current_time = int(time.time())
     window_start = current_time - window_seconds
@@ -213,6 +209,24 @@ def check_rate_limit(user_id: str, endpoint: str, max_requests: int, window_seco
     except Exception as error:  # pragma: no cover - Redis failures are environment specific
         LOG_ERROR("Rate limit check failed", error=str(error), user_id=user_id)
         return True, max_requests, current_time + window_seconds
+
+
+def check_rate_limit(user_id: str, endpoint: str, max_requests: int, window_seconds: int) -> tuple[bool, int, int]:
+    """Synchronous rate limit check for non-async contexts."""
+
+    if not CONFIG["RATE_LIMIT_ENABLED"]:
+        return True, 999, 0
+
+    return _check_rate_limit_sync(user_id, endpoint, max_requests, window_seconds)
+
+
+async def check_rate_limit_async(user_id: str, endpoint: str, max_requests: int, window_seconds: int) -> tuple[bool, int, int]:
+    """Async-friendly rate limit check that offloads Redis work to a thread."""
+
+    if not CONFIG["RATE_LIMIT_ENABLED"]:
+        return True, 999, 0
+
+    return await asyncio.to_thread(_check_rate_limit_sync, user_id, endpoint, max_requests, window_seconds)
 
 
 def rate_limit_decorator(max_requests: int | None = None, window_seconds: int | None = None) -> Callable[[F], F]:
@@ -261,6 +275,7 @@ __all__ = [
     "AuthorizationError",
     "RateLimitExceeded",
     "check_rate_limit",
+    "check_rate_limit_async",
     "rate_limit_decorator",
     "require_admin_auth",
     "require_auth",

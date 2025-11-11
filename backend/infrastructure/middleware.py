@@ -19,7 +19,7 @@ from .auth import (
     AuthenticationError,
     AuthorizationError,
     RateLimitExceeded,
-    check_rate_limit,
+    check_rate_limit_async,
     require_admin_auth,
     require_auth,
 )
@@ -180,7 +180,7 @@ def endpoint_wrapper(
                 if rate_limit_config:
                     max_req = int(rate_limit_config.get("requests", CONFIG["RATE_LIMIT_REQUESTS"]))
                     window = int(rate_limit_config.get("window", CONFIG["RATE_LIMIT_WINDOW"]))
-                    allowed, _, reset = check_rate_limit(user_id, fn.__name__, max_req, window)
+                    allowed, _, reset = await check_rate_limit_async(user_id, fn.__name__, max_req, window)
                     if not allowed:
                         retry_after = max(reset - int(time.time()), 0)
                         payload = {

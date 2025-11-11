@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
@@ -10,11 +9,9 @@ import threading
 import time
 from collections.abc import Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-import requests
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
 from prometheus_client import Counter, Gauge, Histogram
@@ -42,6 +39,16 @@ if not _BOOTSTRAP_LOGGER.handlers:
         level=logging.INFO,
         format="%(levelname)s | %(name)s | %(message)s",
         stream=sys.stdout,
+    )
+
+
+MIN_PYTHON_VERSION = (3, 11)
+
+if sys.version_info < MIN_PYTHON_VERSION:
+    detected = ".".join(str(part) for part in sys.version_info[:3])
+    raise RuntimeError(
+        f"Comparoo backend requires Python {MIN_PYTHON_VERSION[0]}.{MIN_PYTHON_VERSION[1]} "
+        f"or newer. Detected: Python {detected}."
     )
 
 
@@ -358,142 +365,6 @@ def initialize_redis() -> Redis:
 raw_redis_connection = initialize_redis()
 
 
-class APIClientError(RuntimeError):
-    """Raised when API client calls fail."""
-
-
-@dataclass(slots=True)
-class APIClient:
-    """Base API client with retry logic and error handling."""
-
-    name: str
-    base_url: str
-    api_key: str
-
-    def __post_init__(self) -> None:
-        self.timeout = CONFIG["API_REQUEST_TIMEOUT"]
-        self.max_retries = CONFIG["API_MAX_RETRIES"]
-        self.backoff_factor = CONFIG["API_BACKOFF_FACTOR"]
-        self._session = requests.Session()
-
-    def call(self, endpoint: str, payload: dict[str, Any], timeout: int | None = None) -> dict[str, Any]:
-        url = f"{self.base_url}{endpoint}"
-        request_timeout = timeout or self.timeout
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-
-        last_error: Exception | None = None
-
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                LOG_DEBUG(
-                    "API call",
-                    service=self.name,
-                    attempt=attempt,
-                    endpoint=endpoint,
-                    timeout=request_timeout,
-                )
-
-                start_time = time.time()
-                response = self._session.post(url, json=payload, headers=headers, timeout=request_timeout)
-                duration = time.time() - start_time
-
-                LOG_DEBUG(
-                    "API response",
-                    service=self.name,
-                    status_code=response.status_code,
-                    duration=duration,
-                )
-                METRICS.histogram(f"api.{self.name}.duration", duration)
-
-                if response.status_code >= 500:
-                    raise APIClientError(f"Server error: {response.status_code}")
-
-                if response.status_code >= 400:
-                    error_msg = f"Client error: {response.status_code}"
-                    try:
-                        error_data = response.json()
-                        detail = error_data.get("error") or error_data.get("message")
-                        if detail:
-                            error_msg = f"{error_msg} - {detail}"
-                    except json.JSONDecodeError:
-                        pass
-
-                    LOG_ERROR(
-                        "API client error",
-                        service=self.name,
-                        status=response.status_code,
-                        error=error_msg,
-                    )
-                    METRICS.increment(f"api.{self.name}.client_error")
-                    raise APIClientError(error_msg)
-
-                METRICS.increment(f"api.{self.name}.success")
-                return cast(dict[str, Any], response.json())
-
-            except (requests.ConnectionError, requests.Timeout) as connection_error:
-                last_error = connection_error
-                LOG_WARNING(
-                    "API connection error",
-                    service=self.name,
-                    attempt=attempt,
-                    max_retries=self.max_retries,
-                    error=str(connection_error),
-                )
-                METRICS.increment(f"api.{self.name}.connection_error")
-
-                if attempt == self.max_retries:
-                    LOG_ERROR("API failed after retries", service=self.name)
-                    METRICS.increment(f"api.{self.name}.failure")
-                    raise APIClientError(f"API call failed: {last_error}") from connection_error
-
-                sleep_time = self.backoff_factor**attempt
-                LOG_DEBUG("API retry backoff", service=self.name, wait_seconds=sleep_time)
-                time.sleep(sleep_time)
-
-            except APIClientError:
-                raise
-
-            except Exception as unexpected_error:
-                last_error = unexpected_error
-                LOG_ERROR(
-                    "API unexpected error",
-                    service=self.name,
-                    error=str(unexpected_error),
-                    attempt=attempt,
-                )
-                METRICS.increment(f"api.{self.name}.unexpected_error")
-
-                if attempt == self.max_retries:
-                    raise APIClientError(f"Unexpected error: {unexpected_error}") from unexpected_error
-
-                time.sleep(self.backoff_factor**attempt)
-
-        raise APIClientError(f"Failed after {self.max_retries} retries: {last_error}")
-
-
-perplexity_client = APIClient(
-    name="perplexity",
-    base_url=CONFIG["PERPLEXITY_BASE_URL"],
-    api_key=CONFIG["PERPLEXITY_API_KEY"],
-)
-
-grok_client = APIClient(
-    name="grok",
-    base_url=CONFIG["GROK_BASE_URL"],
-    api_key=CONFIG["GROK_API_KEY"],
-)
-
-LOG_INFO(
-    "API clients initialized",
-    perplexity=CONFIG["PERPLEXITY_BASE_URL"],
-    grok=CONFIG["GROK_BASE_URL"],
-)
-
-
 REQUEST_TIMEOUT_EXECUTOR = ThreadPoolExecutor(max_workers=max(CONFIG["WORKERS"] * 2, 8))
 
 background_scheduler = BackgroundScheduler()
@@ -629,8 +500,8 @@ def health_check() -> tuple[dict[str, Any], int]:
         all_healthy = False
 
     health_status["checks"]["api_clients"] = {
-        "perplexity": "configured" if perplexity_client.api_key else "missing",
-        "grok": "configured" if grok_client.api_key else "missing",
+        "perplexity": "configured" if CONFIG["PERPLEXITY_API_KEY"] else "missing",
+        "grok": "configured" if CONFIG["GROK_API_KEY"] else "missing",
     }
 
     if all_healthy:
@@ -653,7 +524,7 @@ def readiness_check() -> tuple[dict[str, Any], int]:
         checks["redis"] = False
 
     checks["config"] = bool(CONFIG["PERPLEXITY_API_KEY"] and CONFIG["GROK_API_KEY"])
-    checks["api_clients"] = bool(perplexity_client.api_key and grok_client.api_key)
+    checks["api_clients"] = checks["config"]
 
     all_ready = all(checks.values())
     status_code = 200 if all_ready else 503
@@ -671,10 +542,10 @@ def startup() -> None:
         raw_redis_connection.ping()
         LOG_INFO("✓ Redis connection OK")
 
-        if perplexity_client.api_key:
+        if CONFIG["PERPLEXITY_API_KEY"]:
             LOG_INFO("✓ Perplexity API configured")
 
-        if grok_client.api_key:
+        if CONFIG["GROK_API_KEY"]:
             LOG_INFO("✓ Grok API configured")
 
         if CONFIG["ENABLE_BACKGROUND_JOBS"]:
@@ -773,8 +644,6 @@ COST_PER_SECOND=0.001
 
 
 __all__ = [
-    "APIClient",
-    "APIClientError",
     "CONFIG",
     "EXAMPLE_ENV_FILE",
     "LOG_DEBUG",
@@ -789,9 +658,7 @@ __all__ = [
     "chunks",
     "days_to_seconds",
     "fuzzy_ratio",
-    "grok_client",
     "health_check",
-    "perplexity_client",
     "raw_redis_connection",
     "readiness_check",
     "refresh_product_prices",

@@ -194,14 +194,14 @@ async def compare_endpoint(request: Request) -> tuple[dict[str, Any], int]:
 async def health_endpoint(request: Request) -> tuple[dict[str, Any], int]:
     """GET /health: lightweight health signal for load balancers."""
 
-    return health_check()
+    return await asyncio.to_thread(health_check)
 
 
 @endpoint_wrapper(requires_auth=False)
 async def readiness_endpoint(request: Request) -> tuple[dict[str, Any], int]:
     """GET /ready: readiness probe for orchestration."""
 
-    return readiness_check()
+    return await asyncio.to_thread(readiness_check)
 
 
 @endpoint_wrapper(requires_auth=False)
