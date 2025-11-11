@@ -156,8 +156,8 @@ Required structure:
             "product_title": "Apple MacBook Pro 14 M3"
           
         }
-    ],
-    "summary": "1-2 sentence TLDR of the comparison."
+    ]
+   
 }
 """
 
