@@ -425,7 +425,7 @@ async def research_products(
             {"product": failure["product"].name, "error": failure["error"]} for failure in failures
         ],
     }
-    api_calls = len(successes) * 2 + len(failures)  # research + image search per success, approx
+    api_calls = total_searches + len(failures)
     return StepOutcome(data=successes, api_calls=api_calls, used_cache=cache_hits > 0, metadata=metadata)
 
 
