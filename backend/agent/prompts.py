@@ -72,10 +72,33 @@ TITLE RULES:
 - Remove marketing fluff
 - Example: "Apple MacBook Pro 14 M3" not "The amazing new MacBook Pro 14-inch with M3 chip"
 
+SUMMARY REQUIREMENTS:
+- Create a concise 1-2 sentence summary of the product
+- Focus on key features and value proposition
+
+FULL REVIEW REQUIREMENTS:
+- Write a comprehensive review with 2-3 paragraphs
+- Thoroughly evaluate the product against the comparison metrics provided
+- Discuss performance, strengths, and weaknesses relative to each metric
+- Be specific and evidence-based
+
 CRITICAL: Echo back the product_id provided in the user prompt.
 
 OUTPUT:
 Always respond in valid JSON only. No markdown, no preamble.
+
+Required JSON structure:
+{
+    "product_id": "...",
+    "title": "...",
+    "link": "...",
+    "price": 199900,
+    "image_url": "...",
+    "summary": "1-2 sentence concise summary",
+    "pros": ["...", "..."],
+    "cons": ["...", "..."],
+    "full_review": "2-3 paragraph comprehensive review evaluating all comparison metrics"
+}
 """
 
 
