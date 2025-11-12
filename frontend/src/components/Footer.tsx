@@ -4,6 +4,7 @@ import { Twitter, Instagram, Youtube } from 'lucide-react';
 import { useState } from 'react';
 import Link from 'next/link';
 import { LinkPopup } from './LinkPopup';
+import styles from './Footer.module.css';
 
 export function Footer() {
   const [popupState, setPopupState] = useState<{
@@ -33,87 +34,78 @@ export function Footer() {
   };
 
   return (
-    <footer className="mt-16" style={{ backgroundColor: '#6B5D4F' }}>
-      <div className="max-w-7xl mx-auto px-4 py-12">
-        <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-12 mb-8">
+    <footer className={styles.footer}>
+      <div className={styles.container}>
+        <div className={styles.grid}>
           {/* Company - centered on mobile, middle on desktop */}
-          <div className="text-center md:text-center md:flex-1 md:flex md:justify-center">
+          <div className={styles.companySection}>
             <div>
-              <h3 className="mb-4" style={{ fontSize: '16px', fontWeight: 600, color: '#FAF7F0' }}>Company</h3>
-              <ul className="space-y-2">
-                <li>
-                  <Link 
-                    href="/about"
-                    className="transition-colors text-sm"
-                    style={{ color: '#FAF7F0' }} 
-                  >
+              <h3 className={styles.sectionTitle}>Company</h3>
+              <ul className={styles.linkList}>
+                <li className={styles.linkItem}>
+                  <Link href="/about" className={styles.link}>
                     About
                   </Link>
                 </li>
-                <li>
-                  <Link 
-                    href="/how-it-works"
-                    className="transition-colors text-sm"
-                    style={{ color: '#FAF7F0' }} 
-                  >
+                <li className={styles.linkItem}>
+                  <Link href="/how-it-works" className={styles.link}>
                     How It Works
                   </Link>
                 </li>
-                <li>
-                  <a 
-                    href="#" 
-                    className="transition-colors text-sm hover:opacity-70" 
-                    style={{ color: '#FAF7F0' }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      openContactPopup();
-                    }}
+                <li className={styles.linkItem}>
+                  <button
+                    onClick={openContactPopup}
+                    className={styles.link}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                    type="button"
                   >
                     Contact
-                  </a>
+                  </button>
                 </li>
               </ul>
             </div>
           </div>
-          
+
           {/* Follow - centered on mobile, right side on desktop */}
-          <div className="flex flex-col items-center md:items-end">
-              <h3 className="mb-4" style={{ fontSize: '16px', fontWeight: 600, color: '#FAF7F0' }}>Follow</h3>
-            <div className="flex gap-4">
+          <div className={styles.followSection}>
+            <h3 className={styles.sectionTitle}>Follow</h3>
+            <div className={styles.socialLinks}>
               <button
                 onClick={() => openPopup('Twitter', 'https://twitter.com/comparoo')}
-                className="transition-colors"
-                style={{ color: '#FAF7F0' }}
+                className={styles.socialButton}
+                type="button"
+                aria-label="Follow us on Twitter"
               >
-                <Twitter className="h-5 w-5" />
+                <Twitter className={styles.socialIcon} />
               </button>
               <button
                 onClick={() => openPopup('Instagram', 'https://instagram.com/comparoo')}
-                className="transition-colors"
-                style={{ color: '#FAF7F0' }}
+                className={styles.socialButton}
+                type="button"
+                aria-label="Follow us on Instagram"
               >
-                <Instagram className="h-5 w-5" />
+                <Instagram className={styles.socialIcon} />
               </button>
               <button
                 onClick={() => openPopup('YouTube', 'https://youtube.com/@comparoo')}
-                className="transition-colors"
-                style={{ color: '#FAF7F0' }}
+                className={styles.socialButton}
+                type="button"
+                aria-label="Subscribe to our YouTube channel"
               >
-                <Youtube className="h-5 w-5" />
+                <Youtube className={styles.socialIcon} />
               </button>
             </div>
           </div>
         </div>
-        
+
         {/* Bottom bar */}
-                    <div className="pt-8 border-t" style={{ borderColor: 'rgba(255, 255, 255, 0.2)' }}>
-                    <p className="text-sm text-center" style={{ color: '#FAF7F0' }}>
-            © 2025 Comparoo | <Link 
-              href="/terms"
-              className="hover:text-white transition-colors" 
-            >
+        <div className={styles.bottomBar}>
+          <p className={styles.copyright}>
+            © 2025 Comparoo |{' '}
+            <Link href="/terms">
               Terms of Service
-            </Link> | All product names, logos, and brands are property of their respective owners.
+            </Link>{' '}
+            | All product names, logos, and brands are property of their respective owners.
           </p>
         </div>
       </div>
