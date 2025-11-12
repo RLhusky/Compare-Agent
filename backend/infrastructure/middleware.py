@@ -65,16 +65,25 @@ def add_cors_headers(response: Any, request: Any) -> Any:
 
     allowed_origins = CONFIG["CORS_ORIGINS"]
     if origin in allowed_origins or "*" in allowed_origins:
-        response_headers = getattr(response, "headers", None)
-        if response_headers is None or not isinstance(response_headers, dict):
-            response_headers = {}
-            setattr(response, "headers", response_headers)
+        headers_obj = getattr(response, "headers", None)
+        if headers_obj is None:
+            return response
 
-        response_headers["Access-Control-Allow-Origin"] = origin
-        response_headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        response_headers["Access-Control-Allow-Headers"] = f"Content-Type, {CONFIG['API_KEY_HEADER']}"
-        response_headers["Access-Control-Max-Age"] = str(CONFIG["CORS_MAX_AGE"])
-        response_headers["Access-Control-Allow-Credentials"] = "true"
+        # Starlette/fastapi responses expose MutableHeaders; fall back to dict-like behaviour otherwise.
+        try:
+            headers_obj["Access-Control-Allow-Origin"] = origin
+            headers_obj["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            headers_obj["Access-Control-Allow-Headers"] = f"Content-Type, {CONFIG['API_KEY_HEADER']}"
+            headers_obj["Access-Control-Max-Age"] = str(CONFIG["CORS_MAX_AGE"])
+            headers_obj["Access-Control-Allow-Credentials"] = "true"
+        except TypeError:
+            # In case headers_obj behaves like a plain mapping without __setitem__
+            if isinstance(headers_obj, dict):
+                headers_obj["Access-Control-Allow-Origin"] = origin
+                headers_obj["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+                headers_obj["Access-Control-Allow-Headers"] = f"Content-Type, {CONFIG['API_KEY_HEADER']}"
+                headers_obj["Access-Control-Max-Age"] = str(CONFIG["CORS_MAX_AGE"])
+                headers_obj["Access-Control-Allow-Credentials"] = "true"
 
     return response
 

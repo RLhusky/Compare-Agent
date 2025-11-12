@@ -96,9 +96,12 @@ class GrokClient:
                     raise GrokRateLimitError(response.text)
                 raise error_cls(response.text)
 
-            payload = response.json()
-            logger.debug("grok_response_received", finish_reason=payload.get("choices", [{}])[0].get("finish_reason"))
-            return payload
+            response_payload = response.json()
+            logger.debug(
+                "grok_response_received",
+                finish_reason=response_payload.get("choices", [{}])[0].get("finish_reason"),
+            )
+            return response_payload
 
         try:
             return await send_request()

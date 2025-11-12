@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Sequence
+from typing import Any, Callable, Sequence
 
 from backend.agent import steps
 from backend.api.grok_client import GrokClient
@@ -50,7 +50,9 @@ class ProductComparisonAgent:
         await self.sonar_client.close()
         await self.cache.close()
 
-    async def compare_products(self, request: CompareRequest) -> ComparisonResponse:
+    async def compare_products(
+        self, request: CompareRequest, progress_callback: Callable[[dict[str, Any]], None] | None = None
+    ) -> ComparisonResponse:
         """Run the agent workflow end-to-end."""
 
         start_time = perf_counter()
@@ -67,6 +69,10 @@ class ProductComparisonAgent:
                 logger.info("comparison_cache_hit", category=category, constraints=constraints)
                 cached_response["cached_result"] = True
                 response = ComparisonResponse.model_validate(cached_response)
+                if progress_callback:
+                    progress_callback({"step": "discovery", "status": "complete", "progress": 33})
+                    progress_callback({"step": "research", "status": "complete", "progress": 66})
+                    progress_callback({"step": "comparison", "status": "complete", "progress": 100})
                 return response
 
         async with asyncio.timeout(self.settings.workflow_timeout_seconds):
@@ -82,6 +88,10 @@ class ProductComparisonAgent:
             api_calls += discovery_outcome.api_calls
             self._ensure_budget(api_calls)
 
+            # Notify progress: Discovery complete
+            if progress_callback:
+                progress_callback({"step": "discovery", "status": "complete", "progress": 33})
+
             candidates = discovery_outcome.metadata.get("products", [])
             if not candidates:
                 raise ValueError("Sonar discovery did not return any products.")
@@ -96,6 +106,10 @@ class ProductComparisonAgent:
             )
             api_calls += research_outcome.api_calls
             self._ensure_budget(api_calls)
+
+            # Notify progress: Research complete
+            if progress_callback:
+                progress_callback({"step": "research", "status": "complete", "progress": 66})
 
             research_products = research_outcome.data
             if len(research_products) < 2:
@@ -114,6 +128,10 @@ class ProductComparisonAgent:
             )
             api_calls += comparison_outcome.api_calls
             self._ensure_budget(api_calls)
+
+            # Notify progress: Comparison complete
+            if progress_callback:
+                progress_callback({"step": "comparison", "status": "complete", "progress": 100})
 
             comparison_payload = comparison_outcome.data
             display_products = comparison_payload.products

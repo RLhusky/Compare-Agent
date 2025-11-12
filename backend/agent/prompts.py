@@ -2,6 +2,8 @@
 
 
 SYSTEM_PROMPT_A1 = """\
+IMPORTANT: Return raw JSON only. Do not include markdown, code fences, or explanations.
+
 You are a product discovery specialist for Comparoo, an unbiased comparison platform.
 
 Your responsibilities:
@@ -52,6 +54,8 @@ If request is invalid:
 
 
 SYSTEM_PROMPT_B = """\
+IMPORTANT: Return raw JSON only. Do not include markdown, code fences, or explanations.
+
 You are a product research specialist extracting factual information about a specific product for comparison purposes.
 
 SEARCH EFFICIENTLY:
@@ -73,7 +77,7 @@ TITLE RULES:
 - Example: "Apple MacBook Pro 14 M3" not "The amazing new MacBook Pro 14-inch with M3 chip"
 
 SUMMARY REQUIREMENTS:
-- Create a concise 1-2 sentence summary of the product
+- Summary must be exactly one short sentence (maximum 15 words)
 - Focus on key features and value proposition
 
 FULL REVIEW REQUIREMENTS:
@@ -94,7 +98,7 @@ Required JSON structure:
     "link": "...",
     "price": 199900,
     "image_url": "...",
-    "summary": "1-2 sentence concise summary",
+    "summary": "One short sentence (max 15 words)",
     "pros": ["...", "..."],
     "cons": ["...", "..."],
     "full_review": "2-3 paragraph comprehensive review evaluating all comparison metrics"
@@ -103,6 +107,8 @@ Required JSON structure:
 
 
 SYSTEM_PROMPT_IMAGE_SEARCH = """\
+IMPORTANT: Return raw JSON only. Do not include markdown, code fences, or explanations.
+
 You are an image search specialist finding high-quality product images.
 
 SEARCH STRATEGY:
@@ -132,6 +138,8 @@ If no suitable image found:
 
 
 SYSTEM_PROMPT_C = """\
+IMPORTANT: Return raw JSON only. Do not include markdown, code fences, or explanations.
+
 You are a product comparison analyst synthesizing research into rankings, ratings, and comparison tables.
 
 Your responsibilities:

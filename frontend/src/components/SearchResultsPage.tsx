@@ -9,7 +9,14 @@ import { SearchLoadingState } from './SearchLoadingState';
 import { SearchProductCard } from './SearchProductCard';
 import { FilterSidebar } from './FilterSidebar';
 import { ErrorDisplay } from './ErrorDisplay';
-import { ApiError, ComparisonResponse, compareProducts } from '../lib/api';
+import { 
+  ApiError, 
+  ComparisonResponse, 
+  compareProducts, 
+  generateSessionId, 
+  connectProgressWebSocket,
+  type ProgressUpdate 
+} from '../lib/api';
 
 type LoadingStatus = 'pending' | 'loading' | 'complete';
 
@@ -21,12 +28,18 @@ interface LoadingStepsState {
 }
 
 interface CardProduct {
-  id: number;
+  id: string;
   name: string;
   image: string;
-  rating: number;
-  price: string;
+  ratingValue: number;
+  ratingText?: string;
+  priceDisplay?: string;
   description: string;
+  summary?: string;
+  strengths: string[];
+  weaknesses: string[];
+  fullReview?: string;
+  link?: string;
   label: 'Overall Pick' | null;
 }
 
@@ -57,6 +70,7 @@ export function SearchResultsPage({ initialQuery }: SearchResultsPageProps) {
 
   const animationFrameRef = useRef<number | null>(null);
   const requestIdRef = useRef(0);
+  const hasInitialLoadRef = useRef(false);
 
   const cancelProgressAnimation = useCallback(() => {
     if (animationFrameRef.current !== null) {
@@ -120,6 +134,8 @@ export function SearchResultsPage({ initialQuery }: SearchResultsPageProps) {
       }
 
       const requestId = ++requestIdRef.current;
+      const sessionId = generateSessionId();
+      
       setSearchQuery('');
       setDisplayedQuery(trimmed);
       setCurrentModalIndex(0);
@@ -132,16 +148,78 @@ export function SearchResultsPage({ initialQuery }: SearchResultsPageProps) {
         ranking: 'pending',
         finalizing: 'pending',
       });
-      startProgressAnimation();
+      setProgress(0);
 
-      try {
-        const response = await compareProducts(trimmed);
+      // Simulate initial progress after 3 seconds
+      const initialProgressTimer = setTimeout(() => {
+        if (requestIdRef.current === requestId) {
+          setProgress(15);
+          setLoadingSteps(prev => ({
+            ...prev,
+            scanning: 'complete',
+            analyzing: 'loading',
+          }));
+        }
+      }, 3000);
 
+      // Connect to WebSocket for real-time progress updates
+      const cleanupWs = connectProgressWebSocket(sessionId, (update: ProgressUpdate) => {
         if (requestIdRef.current !== requestId) {
           return;
         }
 
+        // Smooth progress update
+        setProgress(prevProgress => {
+          const targetProgress = update.progress;
+          // If the new progress is significantly higher, transition smoothly
+          if (targetProgress > prevProgress) {
+            return targetProgress;
+          }
+          return prevProgress;
+        });
+
+        // Update loading steps based on progress
+        if (update.step === 'discovery' && update.status === 'complete') {
+          setLoadingSteps(prev => ({
+            ...prev,
+            scanning: 'complete',
+            analyzing: 'loading',
+          }));
+        } else if (update.step === 'research' && update.status === 'complete') {
+          setLoadingSteps(prev => ({
+            ...prev,
+            analyzing: 'complete',
+            ranking: 'loading',
+          }));
+        } else if (update.step === 'comparison' && update.status === 'complete') {
+          setLoadingSteps(prev => ({
+            ...prev,
+            ranking: 'complete',
+            finalizing: 'loading',
+          }));
+          
+          // Mark finalizing as complete 2 seconds after ranking
+          setTimeout(() => {
+            if (requestIdRef.current === requestId) {
+              setLoadingSteps(prev => ({
+                ...prev,
+                finalizing: 'complete',
+              }));
+            }
+          }, 2000);
+        }
+      });
+
+      try {
+        const response = await compareProducts(trimmed, undefined, sessionId);
+
+        if (requestIdRef.current !== requestId) {
+          clearTimeout(initialProgressTimer);
+          return;
+        }
+
         setComparisonData(response);
+        setProgress(100);
         setLoadingSteps({
           scanning: 'complete',
           analyzing: 'complete',
@@ -149,6 +227,8 @@ export function SearchResultsPage({ initialQuery }: SearchResultsPageProps) {
           finalizing: 'complete',
         });
       } catch (err) {
+        clearTimeout(initialProgressTimer);
+        
         if (requestIdRef.current !== requestId) {
           return;
         }
@@ -167,18 +247,20 @@ export function SearchResultsPage({ initialQuery }: SearchResultsPageProps) {
         });
       } finally {
         if (requestIdRef.current === requestId) {
-          finishProgressAnimation();
           setLoading(false);
+          cleanupWs();
+          clearTimeout(initialProgressTimer);
         }
       }
     },
-    [finishProgressAnimation, startProgressAnimation]
+    []
   );
 
   useEffect(() => {
-    if (initialQuery.trim()) {
+    if (initialQuery.trim() && !hasInitialLoadRef.current) {
+      hasInitialLoadRef.current = true;
       executeSearch(initialQuery);
-    } else {
+    } else if (!initialQuery.trim()) {
       setLoading(false);
       setLoadingSteps(DEFAULT_LOADING_STEPS);
     }
@@ -199,12 +281,18 @@ export function SearchResultsPage({ initialQuery }: SearchResultsPageProps) {
     }
 
     return comparisonData.products.map((product, index): CardProduct => ({
-      id: index,
+      id: product.product_id || String(index),
       name: product.name,
       image: product.image_url || '',
-      rating: parseRating(product.rating),
-      price: '—',
+      ratingValue: parseRating(product.rating),
+      ratingText: product.rating,
+      priceDisplay: product.price_display || (product.price_cents ? `$${(product.price_cents / 100).toFixed(0)}` : '—'),
       description: product.description,
+      summary: product.summary,
+      strengths: product.strengths || [],
+      weaknesses: product.weaknesses || [],
+      fullReview: product.full_review,
+      link: product.link,
       label: index === 0 ? 'Overall Pick' : null,
     }));
   }, [comparisonData, parseRating]);
@@ -358,13 +446,20 @@ export function SearchResultsPage({ initialQuery }: SearchResultsPageProps) {
                 id={product.id}
                 name={product.name}
                 image={product.image}
-                rating={product.rating}
-                price={product.price}
+                ratingValue={product.ratingValue}
+                ratingText={product.ratingText}
+                priceDisplay={product.priceDisplay}
                 description={product.description}
+                summary={product.summary}
+                strengths={product.strengths}
+                weaknesses={product.weaknesses}
+                fullReview={product.fullReview}
+                link={product.link}
                 label={product.label}
                 allProducts={cardProducts}
                 currentIndex={index}
                 onNavigate={setCurrentModalIndex}
+                metricsTable={comparisonData?.comparison?.metrics_table}
               />
             ))}
           </div>

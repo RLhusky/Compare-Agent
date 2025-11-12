@@ -38,6 +38,7 @@ class CandidateProduct(BaseModel):
         "amazon_top_rated",
         "reddit_recommendations",
         "forum_recommendations",
+        "sonar_a1",
     ] | None = None
     confidence: Literal["high", "medium", "low"] | None = None
 
@@ -104,6 +105,7 @@ class ProductExtraction(BaseModel):
     rating: str | None = None
     review_url: AnyHttpUrl | None = None
     extraction_confidence: Literal["high", "medium", "low"] = "medium"
+    price_cents: int | None = None
 
 
 class DisplayProduct(ProductExtraction):
@@ -111,6 +113,9 @@ class DisplayProduct(ProductExtraction):
 
     strengths: list[str] = Field(default_factory=list)
     weaknesses: list[str] = Field(default_factory=list)
+    summary: str | None = None
+    full_review: str | None = None
+    price_display: str | None = None
 
 
 ComparisonPayload.model_rebuild()

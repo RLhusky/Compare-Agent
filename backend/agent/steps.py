@@ -67,6 +67,28 @@ def _serialize(obj: Any) -> str:
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=True)
 
 
+def _strip_json_fences(content: str) -> str:
+    """Remove markdown code fences from LLM responses."""
+
+    text = content.strip()
+    if text.startswith("```"):
+        # Remove opening fence and optional language hint
+        text = text[3:]
+        if text.lower().startswith("json"):
+            text = text[4:]
+        text = text.lstrip()
+        if "```" in text:
+            text = text.rsplit("```", 1)[0]
+    return text.strip()
+
+
+def _format_price_cents(value: int | None) -> str | None:
+    if value is None or value <= 0:
+        return None
+    dollars = value / 100
+    return f"${dollars:,.2f}"
+
+
 async def sonar_discovery(
     *,
     category: str,
@@ -118,6 +140,7 @@ async def sonar_discovery(
     )
 
     content = response.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+    content = _strip_json_fences(content)
     try:
         payload = json.loads(content)
     except json.JSONDecodeError as exc:
@@ -242,8 +265,9 @@ async def _run_image_search(
         f"Product: {product_name}\n"
         "Find a high-quality product image URL. Return JSON per the schema."
     )
+    system_prompt_image = prompts.SYSTEM_PROMPT_IMAGE_SEARCH.replace("{product_name}", product_name)
     response, _ = await sonar_client.call(
-        system_prompt=prompts.SYSTEM_PROMPT_IMAGE_SEARCH.format(product_name=product_name),
+        system_prompt=system_prompt_image,
         user_prompt=user_prompt,
         max_searches=1,
         timeout_seconds=settings.sonar_timeout_seconds,
@@ -251,6 +275,7 @@ async def _run_image_search(
         max_tokens=200,
     )
     content = response.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+    content = _strip_json_fences(content)
     try:
         payload = json.loads(content)
     except json.JSONDecodeError:
@@ -273,6 +298,7 @@ async def _run_product_research(
     settings: Settings,
 ) -> tuple[ResearchProduct, int]:
     metrics_list = ", ".join(metrics)
+    primary_metric = metrics[0] if metrics else "performance"
     product_id = product.product_id or _generate_product_id(product.name, 0)
     user_prompt = (
         f"Product to research: {product.name}\n"
@@ -282,8 +308,11 @@ async def _run_product_research(
         "Return JSON per the specification in the system prompt."
     )
 
+    system_prompt_research = (
+        prompts.SYSTEM_PROMPT_B.replace("{product_name}", product.name).replace("{metric}", primary_metric)
+    )
     response, search_steps = await sonar_client.call(
-        system_prompt=prompts.SYSTEM_PROMPT_B.format(product_name=product.name),
+        system_prompt=system_prompt_research,
         user_prompt=user_prompt,
         max_searches=settings.b_search_budget_per_agent,
         timeout_seconds=settings.sonar_timeout_seconds,
@@ -291,6 +320,7 @@ async def _run_product_research(
         max_tokens=1400,
     )
     content = response.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+    content = _strip_json_fences(content)
     try:
         payload = json.loads(content)
     except json.JSONDecodeError as exc:
@@ -340,6 +370,7 @@ async def _run_product_research(
         rating=rating,
         review_url=review_url,
         extraction_confidence=extraction_confidence,
+        price_cents=price_cents or None,
     )
 
     research = ResearchProduct(
@@ -409,7 +440,7 @@ async def research_products(
                 )
                 successes.append(research)
             except Exception as exc:
-                logger.error(
+                logger.exception(
                     "product_research_failed",
                     product=candidate.name,
                     error=str(exc),
@@ -534,8 +565,12 @@ async def generate_comparison_payload(
                 rating=rating_str,
                 review_url=product.extraction.review_url,
                 extraction_confidence=product.extraction.extraction_confidence,
+                price_cents=product.price_cents or None,
                 strengths=product.pros,
                 weaknesses=product.cons,
+                summary=product.summary,
+                full_review=product.full_review,
+                price_display=_format_price_cents(product.price_cents),
             )
         )
 

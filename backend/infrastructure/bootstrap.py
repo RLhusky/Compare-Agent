@@ -12,11 +12,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, cast
 
+from dotenv import load_dotenv
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
 from prometheus_client import Counter, Gauge, Histogram
 from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionErrorType
+from pathlib import Path
 
 try:
     # FuzzyWuzzy is the requested library; RapidFuzz is a faster drop-in replacement.
@@ -50,6 +52,13 @@ if sys.version_info < MIN_PYTHON_VERSION:
         f"Comparoo backend requires Python {MIN_PYTHON_VERSION[0]}.{MIN_PYTHON_VERSION[1]} "
         f"or newer. Detected: Python {detected}."
     )
+
+
+# Load environment variables from backend/.env if present so local development
+# automatically picks up API keys and other configuration without additional
+# shell plumbing. Values already present in the environment take precedence.
+_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_ENV_PATH)
 
 
 class ConfigurationError(ValueError):
@@ -262,7 +271,7 @@ class MetricsCollector:
             counter = self.counters.get(name)
             if counter is None:
                 label_names = list(labels.keys())
-                counter = Counter(name.replace(".", "_"), f"Counter for {name}", labelnames=label_names or None)
+                counter = Counter(name.replace(".", "_"), f"Counter for {name}", labelnames=label_names or [])
                 self.counters[name] = counter
         if labels:
             counter.labels(**labels).inc(value)
@@ -274,7 +283,7 @@ class MetricsCollector:
             histogram = self.histograms.get(name)
             if histogram is None:
                 label_names = list(labels.keys())
-                histogram = Histogram(name.replace(".", "_"), f"Histogram for {name}", labelnames=label_names or None)
+                histogram = Histogram(name.replace(".", "_"), f"Histogram for {name}", labelnames=label_names or [])
                 self.histograms[name] = histogram
         if labels:
             histogram.labels(**labels).observe(value)
@@ -286,7 +295,7 @@ class MetricsCollector:
             gauge = self.gauges.get(name)
             if gauge is None:
                 label_names = list(labels.keys())
-                gauge = Gauge(name.replace(".", "_"), f"Gauge for {name}", labelnames=label_names or None)
+                gauge = Gauge(name.replace(".", "_"), f"Gauge for {name}", labelnames=label_names or [])
                 self.gauges[name] = gauge
         if labels:
             gauge.labels(**labels).set(value)

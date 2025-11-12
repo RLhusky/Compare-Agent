@@ -8,7 +8,7 @@ import threading
 import time
 import traceback
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 import prometheus_client
 from fastapi import Request, Response, status
@@ -35,6 +35,7 @@ from .bootstrap import (
     track_request_cost,
 )
 from .middleware import endpoint_wrapper, generate_request_id, timeout_decorator
+from .websocket_progress import get_broadcaster
 
 
 async def run_full_comparison_with_caching(
@@ -42,6 +43,7 @@ async def run_full_comparison_with_caching(
     constraints: str | None,
     *,
     use_cache: bool = True,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> ComparisonResponse:
     """Execute the full comparison workflow using the orchestrator."""
 
@@ -49,7 +51,7 @@ async def run_full_comparison_with_caching(
     compare_request = CompareRequest(category=category, constraints=constraints, use_cache=use_cache)
     agent = ProductComparisonAgent.from_settings(settings=settings)
     try:
-        return await agent.compare_products(compare_request)
+        return await agent.compare_products(compare_request, progress_callback=progress_callback)
     finally:
         await agent.close()
 
@@ -113,19 +115,31 @@ async def compare_endpoint(request: Request) -> tuple[dict[str, Any], int]:
     category = sanitized_data["category"]
     constraints = sanitized_data["constraints"] or None
 
+    # Get session_id from request headers or body for WebSocket progress updates
+    session_id = request.headers.get("X-Session-Id") or data.get("session_id")
+    
     LOG_INFO(
         "Processing comparison",
         category=category,
         constraints=constraints,
         user_id=getattr(request, "user_id", "anonymous"),
+        session_id=session_id,
     )
 
     METRICS.increment("compare.request", category=category.replace(" ", "_"))
 
     comparison_start = time.time()
 
+    # Create progress callback if session_id is provided
+    progress_callback = None
+    if session_id:
+        broadcaster = get_broadcaster()
+        progress_callback = broadcaster.create_callback(session_id)
+
     try:
-        result = await run_full_comparison_with_caching(category, constraints)
+        result = await run_full_comparison_with_caching(
+            category, constraints, progress_callback=progress_callback
+        )
         comparison_duration = time.time() - comparison_start
         searches_used = result.stats.api_calls
 

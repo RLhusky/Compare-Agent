@@ -5,25 +5,32 @@ import { ImageWithFallback } from './figma/ImageWithFallback';
 import { LinkPopup } from './LinkPopup';
 import { useState, useEffect, useCallback } from 'react';
 
-interface SearchProductCardProps {
-  id: number;
+interface ProductCardData {
+  id: string;
   name: string;
   image: string;
-  rating: number;
-  price: string;
+  ratingValue: number;
+  ratingText?: string;
+  priceDisplay?: string;
   description: string;
-  label: 'Overall Pick' | null;
-  allProducts?: Array<{
-    id: number;
-    name: string;
-    image: string;
-    rating: number;
-    price: string;
-    description: string;
-    label: 'Overall Pick' | null;
-  }>;
+  summary?: string;
+  strengths: string[];
+  weaknesses: string[];
+  fullReview?: string;
+  link?: string;
+  label?: string | null;
+}
+
+interface ComparisonMetricsTable {
+  headers: string[];
+  rows: string[][];
+}
+
+interface SearchProductCardProps extends ProductCardData {
+  allProducts?: ProductCardData[];
   currentIndex?: number;
   onNavigate?: (index: number) => void;
+  metricsTable?: ComparisonMetricsTable;
 }
 
 // Half Star Component
@@ -41,7 +48,7 @@ function HalfStar({ size = 'small' }: { size?: 'small' | 'large' }) {
 }
 
 // Get label styling - black squircle for Overall Pick
-function getLabelStyle(label: 'Overall Pick') {
+function getLabelStyle(label: string | null) {
   return {
     background: '#000000',
     color: '#FFFFFF',
@@ -50,7 +57,25 @@ function getLabelStyle(label: 'Overall Pick') {
   };
 }
 
-export function SearchProductCard({ id, name, image, rating, price, description, label, allProducts = [], currentIndex = 0, onNavigate }: SearchProductCardProps) {
+export function SearchProductCard({
+  id,
+  name,
+  image,
+  ratingValue,
+  ratingText,
+  priceDisplay,
+  description,
+  summary,
+  strengths,
+  weaknesses,
+  fullReview,
+  link,
+  label,
+  allProducts = [],
+  currentIndex = 0,
+  onNavigate,
+  metricsTable,
+}: SearchProductCardProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isButtonHovered, setIsButtonHovered] = useState(false);
   const [isLinkPopupOpen, setIsLinkPopupOpen] = useState(false);
@@ -64,7 +89,24 @@ export function SearchProductCard({ id, name, image, rating, price, description,
   }, [currentIndex, isModalOpen]);
   
   // Get the current product to display in modal
-  const modalProduct = allProducts.length > 0 ? allProducts[modalProductIndex] : { id, name, image, rating, price, description, label };
+  const modalProduct =
+    allProducts.length > 0
+      ? allProducts[modalProductIndex]
+      : {
+          id,
+          name,
+          image,
+          ratingValue,
+          ratingText,
+          priceDisplay,
+          description,
+          summary,
+          strengths,
+          weaknesses,
+          fullReview,
+          link,
+          label,
+        };
   
   const handlePrevious = useCallback(() => {
     if (allProducts.length > 0) {
@@ -135,7 +177,7 @@ export function SearchProductCard({ id, name, image, rating, price, description,
 
   // Render stars based on rating
   const renderStars = (size: 'small' | 'large' = 'small', productRating?: number) => {
-    const ratingToUse = productRating !== undefined ? productRating : rating;
+    const ratingToUse = productRating !== undefined ? productRating : ratingValue;
     const stars = [];
     const iconSize = size === 'small' ? 'h-4 w-4' : 'h-5 w-5';
     
@@ -197,7 +239,9 @@ export function SearchProductCard({ id, name, image, rating, price, description,
           <div className="p-6 flex-1 flex flex-col">
             <div className="flex items-start justify-between mb-3">
               <h3 className="flex-1" style={{ fontSize: '22px', fontWeight: 700, color: '#4E342E' }}>{name}</h3>
-              <span className="ml-3 flex-shrink-0" style={{ fontSize: '18px', fontWeight: 700, color: '#52B54B' }}>{price}</span>
+              <span className="ml-3 flex-shrink-0" style={{ fontSize: '18px', fontWeight: 700, color: '#52B54B' }}>
+                {priceDisplay ?? 'Price unavailable'}
+              </span>
             </div>
             
             {/* Description - clickable */}
@@ -277,15 +321,16 @@ export function SearchProductCard({ id, name, image, rating, price, description,
                   
                   {/* Stars */}
                   <div className="flex items-center gap-2 mb-6">
-                    {renderStars('large', modalProduct.rating)}
-                    <span style={{ fontSize: '20px', color: '#4E342E' }}>{modalProduct.rating}/5.0</span>
+                    {renderStars('large', modalProduct.ratingValue)}
+                    <span style={{ fontSize: '20px', color: '#4E342E' }}>
+                      {modalProduct.ratingText || `${modalProduct.ratingValue}/5.0`}
+                    </span>
                   </div>
 
                   {/* Price and View Product Button - Same Level */}
                   <div className="flex items-center justify-between mb-12">
                     <div className="flex items-baseline gap-1">
-                      <span style={{ fontSize: '24px', fontWeight: 600, color: '#52B54B', opacity: 0.8 }}>$</span>
-                      <span style={{ fontSize: '36px', fontWeight: 700, color: '#52B54B' }}>{modalProduct.price.replace('$', '')}</span>
+                      <span style={{ fontSize: '36px', fontWeight: 700, color: '#52B54B' }}>{modalProduct.priceDisplay || '—'}</span>
                     </div>
                     <button 
                       onClick={(e) => {
@@ -306,7 +351,7 @@ export function SearchProductCard({ id, name, image, rating, price, description,
                   <div className="mb-8">
                     <h2 className="mb-3" style={{ fontSize: '24px', fontWeight: 600, color: '#4E342E' }}>About this Item:</h2>
                     <p style={{ fontSize: '18px', lineHeight: '1.8', color: '#4E342E' }}>
-                      {modalProduct.description}
+                      {modalProduct.summary || modalProduct.description}
                     </p>
                   </div>
                 </div>
@@ -315,24 +360,10 @@ export function SearchProductCard({ id, name, image, rating, price, description,
               {/* Full Review */}
               <div className="mb-8">
                 <h2 className="mb-4 text-center" style={{ fontSize: '28px', fontWeight: 600, color: '#4E342E' }}>Full Review</h2>
-                <p className="mb-4" style={{ fontSize: '17px', lineHeight: '1.7', color: '#4E342E' }}>
-                  After extensive testing and user feedback analysis, we can confidently recommend this product
-                  for its outstanding performance and reliability. The manufacturer has maintained high standards
-                  in production, ensuring consistency and durability. Whether you&apos;re a first-time buyer or a
-                  seasoned enthusiast, this product offers excellent value and satisfaction.
-                </p>
-                <p className="mb-4" style={{ fontSize: '17px', lineHeight: '1.7', color: '#4E342E' }}>
-                  This comprehensive review covers all aspects of the product, including build quality,
-                  design aesthetics, functionality, and overall value for money. Our expert reviewers have
-                  tested this product extensively to provide you with the most accurate and helpful information
-                  to make an informed decision.
-                </p>
-                <p style={{ fontSize: '17px', lineHeight: '1.7', color: '#4E342E' }}>
-                  The product demonstrates exceptional quality in its category and has received positive feedback
-                  from numerous users. After comparing against multiple alternatives, this product stands out for
-                  its combination of features, price point, and overall user satisfaction ratings.
-                  </p>
+                <div style={{ fontSize: '17px', lineHeight: '1.7', color: '#4E342E', whiteSpace: 'pre-wrap' }}>
+                  {modalProduct.fullReview || modalProduct.description || 'No review available.'}
                 </div>
+              </div>
 
               {/* Pros & Cons */}
               <div className="grid md:grid-cols-2 gap-6 mb-8">
@@ -340,22 +371,19 @@ export function SearchProductCard({ id, name, image, rating, price, description,
                 <div className="p-6" style={{ backgroundColor: '#D4EDDA', border: '1px solid #C3E6CB', borderRadius: '4px' }}>
                   <h3 className="mb-4" style={{ fontSize: '22px', fontWeight: 700, color: '#4E342E' }}>Pros</h3>
                   <ul className="space-y-3">
-                    <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <Check className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
-                      <span style={{ fontSize: '17px' }}>Exceptional build quality and durability</span>
-                    </li>
-                    <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <Check className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
-                      <span style={{ fontSize: '17px' }}>Great value for money</span>
-                    </li>
-                    <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <Check className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
-                      <span style={{ fontSize: '17px' }}>Positive user reviews across the board</span>
-                    </li>
-                    <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <Check className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
-                      <span style={{ fontSize: '17px' }}>Modern design that fits any style</span>
-                    </li>
+                    {modalProduct.strengths && modalProduct.strengths.length > 0 ? (
+                      modalProduct.strengths.map((strength, i) => (
+                        <li key={i} className="flex items-start gap-2" style={{ color: '#4E342E' }}>
+                          <Check className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
+                          <span style={{ fontSize: '17px' }}>{strength}</span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
+                        <Check className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
+                        <span style={{ fontSize: '17px' }}>No strengths listed</span>
+                      </li>
+                    )}
                   </ul>
                 </div>
                 
@@ -363,111 +391,53 @@ export function SearchProductCard({ id, name, image, rating, price, description,
                 <div className="p-6" style={{ backgroundColor: '#F8D7DA', border: '1px solid #F5C6CB', borderRadius: '4px' }}>
                   <h3 className="mb-4" style={{ fontSize: '22px', fontWeight: 700, color: '#4E342E' }}>Cons</h3>
                   <ul className="space-y-3">
-                    <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <X className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
-                      <span style={{ fontSize: '17px' }}>Higher price point compared to some competitors.</span>
-                    </li>
-                    <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <X className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
-                      <span style={{ fontSize: '17px' }}>Bulky design may not be ideal for all users.</span>
-                    </li>
+                    {modalProduct.weaknesses && modalProduct.weaknesses.length > 0 ? (
+                      modalProduct.weaknesses.map((weakness, i) => (
+                        <li key={i} className="flex items-start gap-2" style={{ color: '#4E342E' }}>
+                          <X className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
+                          <span style={{ fontSize: '17px' }}>{weakness}</span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
+                        <X className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
+                        <span style={{ fontSize: '17px' }}>No weaknesses listed</span>
+                      </li>
+                    )}
                   </ul>
                 </div>
               </div>
 
               {/* Product Scorecard Table */}
-              <div className="mb-8">
-                <h2 className="mb-4 text-center" style={{ fontSize: '28px', fontWeight: 600, color: '#4E342E' }}>Comparison to Alternatives</h2>
-                <div className="overflow-x-auto border border-gray-200" style={{ borderRadius: '4px' }}>
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>Metric</th>
-                        <th className="px-6 py-3 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>Score</th>
-                        <th className="px-6 py-3 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>Industry Avg</th>
-                        <th className="px-6 py-3 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>Rating</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4" style={{ fontSize: '15px', color: '#4E342E' }}>Build Quality</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2.5 py-1 bg-emerald-100 text-emerald-700" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px' }}>
-                            9.2/10
-                          </span>
-                        </td>
-                        <td className="px-6 py-4" style={{ fontSize: '14px', color: '#4E342E' }}>7.5/10</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-700" style={{ fontSize: '13px', fontWeight: 600, borderRadius: '4px' }}>
-                            <Check className="h-3 w-3" />
-                            Excellent
-                          </span>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4" style={{ fontSize: '15px', color: '#4E342E' }}>Value for Money</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2.5 py-1 bg-emerald-100 text-emerald-700" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px' }}>
-                            8.7/10
-                          </span>
-                        </td>
-                        <td className="px-6 py-4" style={{ fontSize: '14px', color: '#4E342E' }}>7.0/10</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-700" style={{ fontSize: '13px', fontWeight: 600, borderRadius: '4px' }}>
-                            <Check className="h-3 w-3" />
-                            Great
-                          </span>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4" style={{ fontSize: '15px', color: '#4E342E' }}>Design</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2.5 py-1 bg-emerald-100 text-emerald-700" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px' }}>
-                            9.5/10
-                          </span>
-                        </td>
-                        <td className="px-6 py-4" style={{ fontSize: '14px', color: '#4E342E' }}>8.0/10</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-700" style={{ fontSize: '13px', fontWeight: 600, borderRadius: '4px' }}>
-                            <Check className="h-3 w-3" />
-                            Outstanding
-                          </span>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4" style={{ fontSize: '15px', color: '#4E342E' }}>Durability</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2.5 py-1 bg-emerald-100 text-emerald-700" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px' }}>
-                            8.9/10
-                          </span>
-                        </td>
-                        <td className="px-6 py-4" style={{ fontSize: '14px', color: '#4E342E' }}>7.3/10</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-700" style={{ fontSize: '13px', fontWeight: 600, borderRadius: '4px' }}>
-                            <Check className="h-3 w-3" />
-                            Excellent
-                          </span>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4" style={{ fontSize: '15px', color: '#4E342E' }}>Customer Satisfaction</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2.5 py-1 bg-emerald-100 text-emerald-700" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px' }}>
-                            9.1/10
-                          </span>
-                        </td>
-                        <td className="px-6 py-4" style={{ fontSize: '14px', color: '#4E342E' }}>7.8/10</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-700" style={{ fontSize: '13px', fontWeight: 600, borderRadius: '4px' }}>
-                            <Check className="h-3 w-3" />
-                            Excellent
-                          </span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+              {metricsTable && metricsTable.headers && metricsTable.rows && (
+                <div className="mb-8">
+                  <h2 className="mb-4 text-center" style={{ fontSize: '28px', fontWeight: 600, color: '#4E342E' }}>Comparison Chart</h2>
+                  <div className="overflow-x-auto border border-gray-200" style={{ borderRadius: '4px' }}>
+                    <table className="w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          {metricsTable.headers.map((header, i) => (
+                            <th key={i} className="px-6 py-3 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>
+                              {header}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {metricsTable.rows.map((row, rowIndex) => (
+                          <tr key={rowIndex} className="hover:bg-gray-50 transition-colors">
+                            {row.map((cell, cellIndex) => (
+                              <td key={cellIndex} className="px-6 py-4" style={{ fontSize: '15px', color: '#4E342E' }}>
+                                {cell}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              )}
               
               {/* Mini Card Carousel */}
               {allProducts.length > 1 && (
@@ -514,7 +484,7 @@ export function SearchProductCard({ id, name, image, rating, price, description,
         isOpen={isLinkPopupOpen}
         onClose={() => setIsLinkPopupOpen(false)}
         title="Product Link"
-        link="https://example.com/product-link"
+        link={link || "https://example.com/product-link"}
       />
     </>
   );

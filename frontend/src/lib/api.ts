@@ -1,14 +1,6 @@
-type GlobalWithProcess = typeof globalThis & {
-  process?: {
-    env?: {
-      NEXT_PUBLIC_API_URL?: string;
-    };
-  };
-};
-
-const API_BASE_URL =
-  ((globalThis as GlobalWithProcess).process?.env?.NEXT_PUBLIC_API_URL ??
-    "http://localhost:8000");
+// In Next.js, NEXT_PUBLIC_* variables are replaced at build time
+// They're available directly via process.env in client components
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export interface CompareProductsRequest {
   category: string;
@@ -24,6 +16,10 @@ export interface ComparisonProduct {
   rating: string;
   strengths: string[];
   weaknesses: string[];
+  price_cents?: number;
+  summary?: string;
+  full_review?: string;
+  price_display?: string;
 }
 
 export interface ComparisonMetrics {
@@ -68,9 +64,68 @@ export class ApiError extends Error {
   }
 }
 
+export function generateSessionId(): string {
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+}
+
+export interface ProgressUpdate {
+  step: string;
+  status: string;
+  progress: number;
+}
+
+export function connectProgressWebSocket(
+  sessionId: string,
+  onProgress: (data: ProgressUpdate) => void
+): () => void {
+  const wsUrl = API_BASE_URL.replace(/^http/, "ws");
+  const wsEndpoint = `${wsUrl}/ws/compare/${sessionId}`;
+  
+  console.log("Connecting to WebSocket:", wsEndpoint);
+  
+  try {
+    const ws = new WebSocket(wsEndpoint);
+
+    ws.onopen = () => {
+      console.log("WebSocket connection opened");
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log("WebSocket message received:", data);
+        onProgress(data);
+      } catch (error) {
+        console.error("Failed to parse WebSocket message:", error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+      // Don't throw, just log - WebSocket errors are expected if backend doesn't support it yet
+    };
+
+    ws.onclose = (event) => {
+      console.log("WebSocket connection closed:", event.code, event.reason);
+    };
+
+    // Return cleanup function
+    return () => {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+    };
+  } catch (error) {
+    console.error("Failed to create WebSocket:", error);
+    // Return a no-op cleanup function if WebSocket creation fails
+    return () => {};
+  }
+}
+
 export async function compareProducts(
   category: string,
-  constraints?: string
+  constraints?: string,
+  sessionId?: string
 ): Promise<ComparisonResponse> {
   const trimmedCategory = category.trim();
   const trimmedConstraints = constraints?.trim();
@@ -84,13 +139,19 @@ export async function compareProducts(
     payload.constraints = trimmedConstraints;
   }
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  
+  if (sessionId) {
+    headers["X-Session-Id"] = sessionId;
+  }
+
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}/api/v1/compare`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify(payload),
     });
   } catch (error) {

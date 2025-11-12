@@ -105,6 +105,7 @@ export function SearchLoadingState({ steps, progress }: SearchLoadingStateProps)
               style={{ 
                 background: 'linear-gradient(to right, #B4A585, #9B8F73)',
                 width: '0%',
+                transition: 'width 0.5s ease-out',
                 willChange: 'width',
                 transform: 'translateZ(0)', // Force hardware acceleration
                 backfaceVisibility: 'hidden'
