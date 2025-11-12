@@ -4,7 +4,6 @@ import { Star, ArrowRight, Check, X, ShoppingCart, ChevronLeft, ChevronRight, Ar
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import { LinkPopup } from './LinkPopup';
 import { useState, useEffect, useCallback } from 'react';
-import styles from './SearchProductCard.module.css';
 
 interface ProductCardData {
   id: string;
