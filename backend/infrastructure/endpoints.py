@@ -192,13 +192,13 @@ async def compare_endpoint(request: Request) -> tuple[dict[str, Any], int]:
     except GlmClientError as exc:
         error_msg = str(exc)
         LOG_ERROR(
-            "Compare endpoint sonar failure",
+            "Compare endpoint GLM client failure",
             user_id=getattr(request, "user_id", "anonymous"),
             category=category,
             error=error_msg,
             traceback=traceback.format_exc(),
         )
-        METRICS.increment("compare.sonar_error")
+        METRICS.increment("compare.glm_error")
         return {
             "status": "ERROR",
             "error": "Upstream model error",

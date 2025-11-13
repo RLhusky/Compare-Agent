@@ -31,13 +31,6 @@ class Settings(BaseSettings):
     brave_api_key: str = Field(default="", validation_alias="BRAVE_API_KEY")
     brave_max_results: int = Field(default=5, validation_alias="BRAVE_MAX_RESULTS")
 
-    # Legacy aliases for backward compatibility (will use GLM values if not set)
-    perplexity_api_key: str = Field(default="", validation_alias="PERPLEXITY_API_KEY")
-    perplexity_base_url: str = Field(default="", validation_alias="PERPLEXITY_BASE_URL")
-    sonar_model: str = Field(default="", validation_alias="SONAR_MODEL")
-    sonar_timeout_seconds: float = Field(default=8.0, validation_alias="SONAR_TIMEOUT_SECONDS")
-    sonar_max_retries: int = Field(default=2, validation_alias="SONAR_MAX_RETRIES")
-
     # Budget / workflow controls
     max_api_calls_per_comparison: int = Field(default=8)
     workflow_timeout_seconds: float = Field(default=30.0)

@@ -44,10 +44,10 @@ npm run dev
 
 ## What Works Without Real API Keys
 
-✅ Frontend will load and connect to backend  
-✅ Backend will start and accept requests  
-✅ Health checks will work  
-❌ Actual product comparisons will fail (needs real Perplexity & Grok API keys)
+✅ Frontend will load and connect to backend
+✅ Backend will start and accept requests
+✅ Health checks will work
+❌ Actual product comparisons will fail (needs real OpenRouter & Brave API keys)
 
 ## Troubleshooting
 
@@ -62,6 +62,6 @@ npm run dev
 
 **API calls fail:**
 - Add real API keys to `backend/.env`:
-  - `PERPLEXITY_API_KEY=your_key_here`
-  - `GROK_API_KEY=your_key_here`
+  - `OPENROUTER_API_KEY=your_key_here`
+  - `BRAVE_API_KEY=your_key_here`
 
