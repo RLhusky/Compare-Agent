@@ -1,21 +1,21 @@
 # Product Comparison Agent
 
-Agentic backend for a scalable product comparison website powered by Grok 4 Fast.  
-The service orchestrates a six-step workflow that discovers comparison metrics, lifts products from authoritative review sites, extracts mandatory product data in parallel, generates comparisons, and formats the results for frontend consumption — all while respecting strict compute and API budgets.
+Agentic backend for a scalable product comparison website powered by GLM 4.6 via OpenRouter.
+The service orchestrates a multi-step workflow that discovers comparison metrics, lifts products from authoritative review sites, extracts mandatory product data in parallel, generates comparisons, and formats the results for frontend consumption — all while respecting strict compute and API budgets.
 
 ## Project Structure
 
 This repository contains both the backend and frontend:
 
-- **`backend/`** - Python FastAPI backend with Grok 4 Fast integration
+- **`backend/`** - Python FastAPI backend with GLM 4.6 via OpenRouter
 - **`frontend/`** - Next.js React frontend application
 
 ## Backend
 
 ### Key Capabilities
-- Grok 4 Fast reasoning/non-reasoning modes with native search integration
-- Hard-coded fallback discovery strategies for resilient product sourcing
-- Parallel Step 4 extraction with concurrency/budget controls
+- GLM 4.6 via OpenRouter using **Cerebras** provider (500 TPS throughput)
+- Brave Search integration for real-time product discovery
+- Parallel product research with up to 20 concurrent agents
 - Aggressive Redis caching across metrics, product data, and comparisons
 - Structured FastAPI endpoint returning ready-to-render payloads
 - Centralized logging, error handling, and budget enforcement
@@ -28,7 +28,8 @@ backend/
     prompts.py        # Prompt templates for each step
     steps.py          # Step implementations
   api/
-    grok_client.py    # HTTP client wrapper with retries & timeouts
+    glm_client.py     # OpenRouter GLM 4.6 client with parallel tool execution
+    brave_client.py   # Brave Search API client
   cache/
     redis_cache.py    # Redis-backed cache helper
     logging_config.py   # structlog configuration utilities
@@ -94,30 +95,34 @@ You can think of the file as a well-organised playbook: every helper builds towa
   - Deploy to a staging environment, run load tests, and confirm observability dashboards (Prometheus, logs) capture the right signals.  
   - Update operational runbooks with the new admin endpoints and failure recovery steps.
 
-## Sonar + Grok Workflow
+## GLM 4.6 + Brave Search Workflow
 
-1. **Sonar Agent A1 – Discovery & Validation**  
-   Single prompt validates the request, produces comparison metrics, and returns exactly six candidate products. Results are cached by category.
-2. **Sonar Agent B – Parallel Product Research**  
-   Up to six Sonar agents run concurrently to gather pricing, links, summaries, pros/cons, and detailed reviews. Image search is executed as a dedicated Sonar step when needed. Outputs are cached per product per day.
-3. **Grok Agent C – Ranking & Table Synthesis**  
-   Grok 4 Fast Reasoning turns the research corpus into star ratings, rankings, and a comparison table ready for the frontend (with optional TL;DR text).
+1. **GLM Agent A1 – Discovery & Validation**
+   Single prompt validates the request, produces comparison metrics, and returns candidate products. Uses Brave Search for real-time discovery. Results are cached by category.
+2. **GLM Agent B – Parallel Product Research**
+   Up to 20 GLM agents run concurrently to gather pricing, links, summaries, pros/cons, and detailed reviews. Image search is executed when needed. Outputs are cached per product per day.
+3. **GLM Agent C – Ranking & Table Synthesis**
+   GLM 4.6 turns the research corpus into star ratings, rankings, and a comparison table ready for the frontend.
 
-Compute budgets are enforced end-to-end (`MAX_TOTAL_SEARCHES`, `A1_SEARCH_BUDGET`, `B_SEARCH_BUDGET_PER_AGENT`, and `workflow_timeout≤32s`).
+Compute budgets are enforced end-to-end (`MAX_TOTAL_SEARCHES`, `A1_SEARCH_BUDGET`, `B_SEARCH_BUDGET_PER_AGENT`, and `workflow_timeout≤30s`).
+
+**Performance**: ~16-22 seconds end-to-end with 20 concurrent agents and 500 TPS throughput.
 
 ## Configuration
 
-All settings are defined in `config.py` (Pydantic BaseSettings).  
+All settings are defined in `config.py` (Pydantic BaseSettings).
 Environment variables (with defaults) include:
 
-- `GROK_API_KEY` / `GROK_BASE_URL`
-- `PERPLEXITY_API_KEY` / `PERPLEXITY_BASE_URL` (Sonar)
-- `SONAR_MODEL`, `SONAR_TIMEOUT_SECONDS`, `SONAR_MAX_RETRIES`
+- `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL`
+- `OPENROUTER_ROUTING` (default: Cerebras primary, Fireworks fallback)
+- `BRAVE_API_KEY`
+- `GLM_MODEL` (default: "z-ai/glm-4.6")
+- `GLM_TIMEOUT_SECONDS` (default: 8.0)
 - `REDIS_URL`
-- `MAX_API_CALLS_PER_COMPARISON`
-- `WORKFLOW_TIMEOUT_SECONDS`, `STEP_TIMEOUT_SECONDS`
+- `MAX_API_CALLS_PER_COMPARISON` (default: 8)
+- `WORKFLOW_TIMEOUT_SECONDS` (default: 30.0)
+- `EXTRACTION_MAX_CONCURRENCY` (default: 20)
 - `MAX_TOTAL_SEARCHES`, `A1_SEARCH_BUDGET`, `B_SEARCH_BUDGET_PER_AGENT`
-- `EXTRACTION_MAX_CONCURRENCY`, `EXTRACTION_TIMEOUT_SECONDS`
 - TTL values for metrics, products, and comparison caches
 - Logging mode (`LOG_JSON`, `LOG_LEVEL`)
 
@@ -127,7 +132,7 @@ Create a `.env` file or inject vars at runtime.
 
 - Async-friendly pytest configuration (`pyproject.toml`)
 - Recommended extras: `pip install -e .[dev]`
-- TODO: add unit tests per step, integration test for full workflow, mock Grok responses
+- TODO: add unit tests per step, integration test for full workflow, mock GLM responses
 
 ## Next Steps
 

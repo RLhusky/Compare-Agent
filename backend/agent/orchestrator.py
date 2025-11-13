@@ -115,6 +115,7 @@ class ProductComparisonAgent:
                 products=candidates,
                 glm_client=self.glm_client,
                 cache=self.cache,
+                metrics=discovery_outcome.data.metrics,
                 use_cache=request.use_cache,
             )
             research_duration = perf_counter() - research_start
@@ -126,13 +127,13 @@ class ProductComparisonAgent:
             if progress_callback:
                 progress_callback({"step": "research", "status": "complete", "progress": 66})
 
-            research_products = research_outcome.data
-            if len(research_products) < 2:
+            extracted_products = research_outcome.data
+            if len(extracted_products) < 2:
                 raise ValueError("Insufficient product data extracted.")
 
             logger.info(
                 "product_research_summary",
-                product_count=len(research_products),
+                product_count=len(extracted_products),
                 **research_outcome.metadata,
             )
 
@@ -140,7 +141,7 @@ class ProductComparisonAgent:
                 "workflow_step_completed",
                 step="research",
                 duration_seconds=research_duration,
-                product_count=len(research_products),
+                product_count=len(extracted_products),
                 cache_hits=research_outcome.metadata.get("cache_hits"),
                 failures=len(research_outcome.metadata.get("failures", [])),
             )
@@ -148,9 +149,8 @@ class ProductComparisonAgent:
             comparison_start = perf_counter()
             comparison_outcome = await generate_comparison_payload(
                 settings=self.settings,
-                theme=discovery_outcome.theme,
-                research=research_outcome.research,
-                telemetry=telemetry,
+                theme=discovery_outcome.data.metrics,
+                research=research_outcome.data,
                 glm_client=self.glm_client,
             )
             comparison_duration = perf_counter() - comparison_start

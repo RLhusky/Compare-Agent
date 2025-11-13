@@ -394,13 +394,8 @@ class GlmClient:
         ]
         aggregated_results: list[dict[str, Any]] = []
 
+        # Use Cerebras as primary provider via OpenRouter routing
         routing_config = self.settings.openrouter_routing
-        if not routing_config:
-            routing_config = {
-                "sort": "throughput",
-                "order": ["cerebras", "fireworks"],
-                "allow_fallbacks": True,
-            }
 
         reasoning_effort = getattr(self.settings, "glm_reasoning_effort", None)
 

@@ -137,18 +137,14 @@ def load_config() -> dict[str, Any]:
     )
 
     # API keys
-    config["PERPLEXITY_API_KEY"] = load_from_env("PERPLEXITY_API_KEY", required=True)
-    config["GROK_API_KEY"] = load_from_env("GROK_API_KEY", required=True)
+    config["OPENROUTER_API_KEY"] = load_from_env("OPENROUTER_API_KEY", required=True)
+    config["BRAVE_API_KEY"] = load_from_env("BRAVE_API_KEY", required=True)
 
     # API configuration
-    config["PERPLEXITY_BASE_URL"] = load_from_env("PERPLEXITY_BASE_URL", "https://api.perplexity.ai")
-    config["GROK_BASE_URL"] = load_from_env("GROK_BASE_URL", "https://api.x.ai/v1")
+    config["OPENROUTER_BASE_URL"] = load_from_env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     config["API_REQUEST_TIMEOUT"] = _int_from_env(load_from_env("API_REQUEST_TIMEOUT", "30"), "API_REQUEST_TIMEOUT")
     config["API_MAX_RETRIES"] = _int_from_env(load_from_env("API_MAX_RETRIES", "3"), "API_MAX_RETRIES")
     config["API_BACKOFF_FACTOR"] = _float_from_env(load_from_env("API_BACKOFF_FACTOR", "2"), "API_BACKOFF_FACTOR")
-    config["SONAR_MODEL"] = load_from_env("SONAR_MODEL", "sonar")
-    config["SONAR_TIMEOUT_SECONDS"] = _float_from_env(load_from_env("SONAR_TIMEOUT_SECONDS", "15"), "SONAR_TIMEOUT_SECONDS")
-    config["SONAR_MAX_RETRIES"] = _int_from_env(load_from_env("SONAR_MAX_RETRIES", "3"), "SONAR_MAX_RETRIES")
 
     # Authentication
     config["API_KEY_HEADER"] = load_from_env("API_KEY_HEADER", "X-API-Key")
@@ -516,8 +512,8 @@ def health_check() -> tuple[dict[str, Any], int]:
         all_healthy = False
 
     health_status["checks"]["api_clients"] = {
-        "perplexity": "configured" if CONFIG["PERPLEXITY_API_KEY"] else "missing",
-        "grok": "configured" if CONFIG["GROK_API_KEY"] else "missing",
+        "openrouter": "configured" if CONFIG["OPENROUTER_API_KEY"] else "missing",
+        "brave": "configured" if CONFIG["BRAVE_API_KEY"] else "missing",
     }
 
     if all_healthy:
@@ -539,7 +535,7 @@ def readiness_check() -> tuple[dict[str, Any], int]:
     except Exception:
         checks["redis"] = False
 
-    checks["config"] = bool(CONFIG["PERPLEXITY_API_KEY"] and CONFIG["GROK_API_KEY"])
+    checks["config"] = bool(CONFIG["OPENROUTER_API_KEY"] and CONFIG["BRAVE_API_KEY"])
     checks["api_clients"] = checks["config"]
 
     all_ready = all(checks.values())
@@ -558,11 +554,11 @@ def startup() -> None:
         raw_redis_connection.ping()
         LOG_INFO("✓ Redis connection OK")
 
-        if CONFIG["PERPLEXITY_API_KEY"]:
-            LOG_INFO("✓ Perplexity API configured")
+        if CONFIG["OPENROUTER_API_KEY"]:
+            LOG_INFO("✓ OpenRouter API configured")
 
-        if CONFIG["GROK_API_KEY"]:
-            LOG_INFO("✓ Grok API configured")
+        if CONFIG["BRAVE_API_KEY"]:
+            LOG_INFO("✓ Brave Search API configured")
 
         if CONFIG["ENABLE_BACKGROUND_JOBS"]:
             start_background_jobs()
@@ -611,15 +607,11 @@ REDIS_DB=0
 REDIS_MAX_CONNECTIONS=50
 
 # API Keys (REQUIRED)
-PERPLEXITY_API_KEY=your_perplexity_key_here
-GROK_API_KEY=your_grok_key_here
+OPENROUTER_API_KEY=your_openrouter_key_here
+BRAVE_API_KEY=your_brave_key_here
 
 # API Configuration
-PERPLEXITY_BASE_URL=https://api.perplexity.ai
-GROK_BASE_URL=https://api.x.ai/v1
-SONAR_MODEL=sonar
-SONAR_TIMEOUT_SECONDS=15
-SONAR_MAX_RETRIES=3
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 API_REQUEST_TIMEOUT=30
 API_MAX_RETRIES=3
 

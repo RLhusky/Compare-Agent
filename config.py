@@ -17,33 +17,30 @@ class Settings(BaseSettings):
     env: Literal["development", "staging", "production"] = Field(default="development")
 
     # OpenRouter / GLM 4.6 configuration with Cerebras routing
-    openrouter_api_key: str = Field(default="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", validation_alias="OPENROUTER_API_KEY")
+    openrouter_api_key: str = Field(default="", validation_alias="OPENROUTER_API_KEY")
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", validation_alias="OPENROUTER_BASE_URL")
     glm_model: str = Field(default="z-ai/glm-4.6", validation_alias="GLM_MODEL")
-    openrouter_routing: dict[str, Any] | None = Field(
-        default=None,
+    openrouter_routing: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "sort": "throughput",
+            "order": ["cerebras", "fireworks"],
+            "allow_fallbacks": True,
+        },
         validation_alias="OPENROUTER_ROUTING",
     )
-    glm_timeout_seconds: float = Field(default=12.0, validation_alias="GLM_TIMEOUT_SECONDS")
+    glm_timeout_seconds: float = Field(default=8.0, validation_alias="GLM_TIMEOUT_SECONDS")
     glm_max_retries: int = Field(default=0, validation_alias="GLM_MAX_RETRIES")
-    glm_connect_timeout_seconds: float = Field(default=4.0)
+    glm_connect_timeout_seconds: float = Field(default=2.0)
     glm_reasoning_effort: str = Field(default="low", validation_alias="GLM_REASONING_EFFORT")
-    brave_api_key: str = Field(default="BSAqadszOhZ-0_0Ei-7pHB-P_HlYWaU", validation_alias="BRAVE_API_KEY")
+    brave_api_key: str = Field(default="", validation_alias="BRAVE_API_KEY")
     brave_max_results: int = Field(default=5, validation_alias="BRAVE_MAX_RESULTS")
-    
-    # Legacy aliases for backward compatibility (will use GLM values if not set)
-    perplexity_api_key: str = Field(default="", validation_alias="PERPLEXITY_API_KEY")
-    perplexity_base_url: str = Field(default="", validation_alias="PERPLEXITY_BASE_URL")
-    sonar_model: str = Field(default="", validation_alias="SONAR_MODEL")
-    sonar_timeout_seconds: float = Field(default=8.0, validation_alias="SONAR_TIMEOUT_SECONDS")
-    sonar_max_retries: int = Field(default=2, validation_alias="SONAR_MAX_RETRIES")
 
     # Budget / workflow controls
     max_api_calls_per_comparison: int = Field(default=8)
-    workflow_timeout_seconds: float = Field(default=65.0)
-    step_timeout_seconds: float = Field(default=15.0)
-    extraction_timeout_seconds: float = Field(default=4.0)
-    extraction_max_concurrency: int = Field(default=5)
+    workflow_timeout_seconds: float = Field(default=30.0)
+    step_timeout_seconds: float = Field(default=12.0)
+    extraction_timeout_seconds: float = Field(default=10.0)
+    extraction_max_concurrency: int = Field(default=20)
     a1_search_budget: int = Field(default=6, validation_alias="A1_SEARCH_BUDGET")
     b_search_budget_per_agent: int = Field(default=1, validation_alias="B_SEARCH_BUDGET_PER_AGENT")
     max_total_searches: int = Field(default=40, validation_alias="MAX_TOTAL_SEARCHES")
