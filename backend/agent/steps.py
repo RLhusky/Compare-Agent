@@ -474,9 +474,8 @@ async def _run_product_research(
     cached_product: ResearchProduct | None,
     glm_client: GlmClient,
     cache: RedisCache,
-    theme: str,
+    theme: Sequence[str],
     semaphore: asyncio.Semaphore,
-    telemetry: Any,
 ) -> tuple[ResearchProduct, int]:
     metrics_list = ", ".join(theme)
     primary_metric = theme[0] if theme else "performance"
@@ -700,7 +699,6 @@ async def research_products(
             searches = 0
             try:
                 research, searches = await _run_product_research(
-                    *,
                     settings=settings,
                     product=candidate,
                     cached_product=None,
@@ -708,7 +706,6 @@ async def research_products(
                     cache=cache,
                     theme=metrics,
                     semaphore=semaphore,
-                    telemetry=None,
                 )
                 duration_ms = (perf_counter() - acquired_time) * 1000
                 total_searches += searches
@@ -806,9 +803,8 @@ def _build_metric_comparison_table(payload: dict[str, Any]) -> MetricComparison:
 async def generate_comparison_payload(
     *,
     settings: Settings,
-    theme: str,
+    theme: Sequence[str],
     research: Sequence[ResearchProduct],
-    telemetry: Any,
     glm_client: GlmClient,
 ) -> StepOutcome[ComparisonPayload]:
     """Use GLM Agent C to rank products, assign star ratings, and build comparison table."""

@@ -115,6 +115,7 @@ class ProductComparisonAgent:
                 products=candidates,
                 glm_client=self.glm_client,
                 cache=self.cache,
+                metrics=discovery_outcome.data.metrics,
                 use_cache=request.use_cache,
             )
             research_duration = perf_counter() - research_start
@@ -148,9 +149,8 @@ class ProductComparisonAgent:
             comparison_start = perf_counter()
             comparison_outcome = await generate_comparison_payload(
                 settings=self.settings,
-                theme=discovery_outcome.theme,
-                research=research_outcome.research,
-                telemetry=telemetry,
+                theme=discovery_outcome.data.metrics,
+                research=research_outcome.data,
                 glm_client=self.glm_client,
             )
             comparison_duration = perf_counter() - comparison_start
