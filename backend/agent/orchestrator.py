@@ -127,13 +127,13 @@ class ProductComparisonAgent:
             if progress_callback:
                 progress_callback({"step": "research", "status": "complete", "progress": 66})
 
-            research_products = research_outcome.data
-            if len(research_products) < 2:
+            extracted_products = research_outcome.data
+            if len(extracted_products) < 2:
                 raise ValueError("Insufficient product data extracted.")
 
             logger.info(
                 "product_research_summary",
-                product_count=len(research_products),
+                product_count=len(extracted_products),
                 **research_outcome.metadata,
             )
 
@@ -141,7 +141,7 @@ class ProductComparisonAgent:
                 "workflow_step_completed",
                 step="research",
                 duration_seconds=research_duration,
-                product_count=len(research_products),
+                product_count=len(extracted_products),
                 cache_hits=research_outcome.metadata.get("cache_hits"),
                 failures=len(research_outcome.metadata.get("failures", [])),
             )
