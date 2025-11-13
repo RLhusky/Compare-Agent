@@ -43,7 +43,7 @@ export function ProductGrid() {
     <section className="py-8 relative">
       {/* Centered bar with title */}
       <div className="mb-8 flex justify-center">
-        <div className="w-full max-w-2xl backdrop-blur-md bg-white/40 rounded-2xl border border-white/50 shadow-lg shadow-gray-200/50 px-6 py-3 text-center">
+        <div className="w-full max-w-2xl backdrop-blur-md bg-white/40 rounded-2xl border border-white/50 px-6 py-3 text-center" style={{ boxShadow: '0 8px 32px rgba(0, 0, 0, 0.06)' }}>
           <h2 style={{ color: '#4E342E' }}>Best Picks of 2025</h2>
         </div>
       </div>

@@ -283,7 +283,7 @@ export function SearchResultsPage({ initialQuery }: SearchResultsPageProps) {
     return comparisonData.products.map((product, index): CardProduct => ({
       id: product.product_id || String(index),
       name: product.name,
-      image: product.image_url || '',
+      image: product.image_url,
       ratingValue: parseRating(product.rating),
       ratingText: product.rating,
       priceDisplay: product.price_display || (product.price_cents ? `$${(product.price_cents / 100).toFixed(0)}` : '—'),

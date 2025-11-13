@@ -38,7 +38,7 @@ class CandidateProduct(BaseModel):
         "amazon_top_rated",
         "reddit_recommendations",
         "forum_recommendations",
-        "sonar_a1",
+        "glm_a1",
     ] | None = None
     confidence: Literal["high", "medium", "low"] | None = None
 
@@ -74,6 +74,7 @@ class WorkflowStats(BaseModel):
     used_fallback: bool = False
     source_summary: dict[str, int] = Field(default_factory=dict)
     extraction_metrics: dict[str, Any] = Field(default_factory=dict)
+    step_durations_seconds: dict[str, float] = Field(default_factory=dict)
 
 
 class ComparisonResponse(BaseModel):

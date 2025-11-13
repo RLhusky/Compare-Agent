@@ -8,9 +8,13 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Callable, Sequence
 
-from backend.agent import steps
-from backend.api.grok_client import GrokClient
-from backend.api.sonar_client import SonarClient
+from backend.api.glm_client import GlmClient
+from backend.agent.steps import (
+    ProductResearch,
+    glm_discovery,
+    research_products,
+    generate_comparison_payload,
+)
 from backend.cache.redis_cache import RedisCache
 from backend.logging_config import get_logger
 from backend.models.schemas import CandidateProduct, CompareRequest, ComparisonResponse, WorkflowStats
@@ -32,22 +36,19 @@ def _hash_query(category: str, constraints: str | None) -> str:
 class ProductComparisonAgent:
     """Coordinates the multi-step agent workflow."""
 
-    client: GrokClient
-    sonar_client: SonarClient
+    glm_client: GlmClient
     cache: RedisCache
     settings: Settings
 
     @classmethod
     def from_settings(cls, settings: Settings | None = None) -> "ProductComparisonAgent":
         settings = settings or get_settings()
-        client = GrokClient(settings=settings)
-        sonar_client = SonarClient(settings=settings)
+        glm_client = GlmClient(settings=settings)
         cache = RedisCache(url=settings.redis_url, enabled=settings.cache_enabled)
-        return cls(client=client, sonar_client=sonar_client, cache=cache, settings=settings)
+        return cls(glm_client=glm_client, cache=cache, settings=settings)
 
     async def close(self) -> None:
-        await self.client.close()
-        await self.sonar_client.close()
+        await self.glm_client.close()
         await self.cache.close()
 
     async def compare_products(
@@ -62,6 +63,7 @@ class ProductComparisonAgent:
         constraints = request.constraints
         cache_hash = _hash_query(category.lower().strip(), constraints)
         comparison_cache_key = f"comparison:{cache_hash}"
+        step_timings: dict[str, float] = {}
 
         if request.use_cache:
             cached_response = await self.cache.get_json(comparison_cache_key)
@@ -76,14 +78,17 @@ class ProductComparisonAgent:
                 return response
 
         async with asyncio.timeout(self.settings.workflow_timeout_seconds):
-            discovery_outcome = await steps.sonar_discovery(
+            discovery_start = perf_counter()
+            discovery_outcome = await glm_discovery(
+                settings=self.settings,
                 category=category,
                 constraints=constraints,
-                sonar_client=self.sonar_client,
+                glm_client=self.glm_client,
                 cache=self.cache,
-                settings=self.settings,
                 use_cache=request.use_cache,
             )
+            discovery_duration = perf_counter() - discovery_start
+            step_timings["discovery"] = discovery_duration
             metrics_result = discovery_outcome.data
             api_calls += discovery_outcome.api_calls
             self._ensure_budget(api_calls)
@@ -94,16 +99,26 @@ class ProductComparisonAgent:
 
             candidates = discovery_outcome.metadata.get("products", [])
             if not candidates:
-                raise ValueError("Sonar discovery did not return any products.")
+                raise ValueError("Discovery did not return any products.")
 
-            research_outcome = await steps.research_products(
-                products=candidates,
-                sonar_client=self.sonar_client,
-                cache=self.cache,
+            logger.info(
+                "workflow_step_completed",
+                step="discovery",
+                duration_seconds=discovery_duration,
+                candidate_count=len(candidates),
+                searches_used=discovery_outcome.metadata.get("searches_used"),
+            )
+
+            research_start = perf_counter()
+            research_outcome = await research_products(
                 settings=self.settings,
-                metrics=metrics_result.metrics,
+                products=candidates,
+                glm_client=self.glm_client,
+                cache=self.cache,
                 use_cache=request.use_cache,
             )
+            research_duration = perf_counter() - research_start
+            step_timings["research"] = research_duration
             api_calls += research_outcome.api_calls
             self._ensure_budget(api_calls)
 
@@ -121,11 +136,25 @@ class ProductComparisonAgent:
                 **research_outcome.metadata,
             )
 
-            comparison_outcome = await steps.generate_comparison_payload(
-                research_products=research_products,
-                metrics=metrics_result.metrics,
-                grok_client=self.client,
+            logger.info(
+                "workflow_step_completed",
+                step="research",
+                duration_seconds=research_duration,
+                product_count=len(research_products),
+                cache_hits=research_outcome.metadata.get("cache_hits"),
+                failures=len(research_outcome.metadata.get("failures", [])),
             )
+
+            comparison_start = perf_counter()
+            comparison_outcome = await generate_comparison_payload(
+                settings=self.settings,
+                theme=discovery_outcome.theme,
+                research=research_outcome.research,
+                telemetry=telemetry,
+                glm_client=self.glm_client,
+            )
+            comparison_duration = perf_counter() - comparison_start
+            step_timings["comparison"] = comparison_duration
             api_calls += comparison_outcome.api_calls
             self._ensure_budget(api_calls)
 
@@ -135,6 +164,13 @@ class ProductComparisonAgent:
 
             comparison_payload = comparison_outcome.data
             display_products = comparison_payload.products
+
+            logger.info(
+                "workflow_step_completed",
+                step="comparison",
+                duration_seconds=comparison_duration,
+                ranked_count=len(display_products),
+            )
 
             stats = WorkflowStats(
                 api_calls=api_calls,
@@ -149,6 +185,7 @@ class ProductComparisonAgent:
                         "status": discovery_outcome.metadata.get("status"),
                     },
                 },
+                step_durations_seconds=step_timings,
             )
 
             response = ComparisonResponse(

@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from .bootstrap import CONFIG, shutdown, startup
 from .endpoints import (
     admin_cache_stats,
+    admin_clear_all_cache,
     admin_invalidate_product_cache,
     admin_invalidate_query_cache,
     admin_trigger_price_refresh,
@@ -69,6 +70,12 @@ def create_app() -> FastAPI:
         "/admin/cache/stats",
         admin_cache_stats,
         methods=["GET"],
+        include_in_schema=False,
+    )
+    router.add_api_route(
+        "/admin/cache/clear",
+        admin_clear_all_cache,
+        methods=["POST"],
         include_in_schema=False,
     )
     router.add_api_route(

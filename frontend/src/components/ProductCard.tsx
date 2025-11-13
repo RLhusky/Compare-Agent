@@ -10,6 +10,7 @@ interface Product {
   price: number;
   category: string;
   review: string;
+  image_url?: string;
 }
 
 interface ProductCardProps {
@@ -46,6 +47,24 @@ function getCategoryColor(category: string) {
     'Jewelry': { bg: '#FFF9C4', text: '#F57F17', border: '#FFF59D' },
   };
   return colors[category] || { bg: '#E0E0E0', text: '#424242', border: '#BDBDBD' };
+}
+
+function getPlaceholderImage(productId: number, width: number, height: number) {
+  return `https://picsum.photos/seed/product-${productId}/${width}/${height}`;
+}
+
+// Standardized badge styles - green for positive, amber for neutral, red for warnings
+function getBadgeStyle(rating: string): { bg: string, text: string } {
+  const ratingLower = rating.toLowerCase();
+  if (ratingLower.includes('excellent') || ratingLower.includes('outstanding')) {
+    return { bg: '#D1FAE5', text: '#065F46' }; // green-50, green-800
+  } else if (ratingLower.includes('great') || ratingLower.includes('good')) {
+    return { bg: '#FEF3C7', text: '#92400E' }; // amber-50, amber-800
+  } else if (ratingLower.includes('fair') || ratingLower.includes('average')) {
+    return { bg: '#FED7AA', text: '#9A3412' }; // amber-100, amber-900
+  } else {
+    return { bg: '#FEE2E2', text: '#991B1B' }; // red-50, red-800
+  }
 }
 
 export function ProductCard({ product, isVisible, allProducts = [], currentIndex = 0, onNavigate }: ProductCardProps) {
@@ -167,14 +186,14 @@ export function ProductCard({ product, isVisible, allProducts = [], currentIndex
           isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
         }`}
       >
-        <div className="bg-white rounded-none border border-gray-200 hover:shadow-lg transition-all duration-300 overflow-hidden hover:-translate-y-2 h-full flex flex-col" style={{ boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)' }}>
+        <div className="bg-white rounded-none border border-gray-200 transition-all duration-300 overflow-hidden hover:-translate-y-2 h-full flex flex-col" style={{ boxShadow: 'none' }} onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 12px 48px rgba(0, 0, 0, 0.08)'} onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}>
           {/* Image container with gradient overlay */}
           <div 
             className="relative aspect-[4/3] overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200 cursor-pointer"
             onClick={handleOpenModal}
           >
             <ImageWithFallback
-              src={`https://images.unsplash.com/photo-${1500000000000 + product.id}?w=400&h=300&fit=crop`}
+              src={product.image_url || getPlaceholderImage(product.id, 400, 300)}
               alt={product.name}
               className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
             />
@@ -192,7 +211,7 @@ export function ProductCard({ product, isVisible, allProducts = [], currentIndex
                 color: getCategoryColor(product.category).text,
                 borderColor: getCategoryColor(product.category).border
               }}>
-                <Tag className="h-3 w-3" />
+                <Tag className="h-4 w-4" />
                 {product.category}
               </span>
             </div>
@@ -218,20 +237,22 @@ export function ProductCard({ product, isVisible, allProducts = [], currentIndex
             {/* Bottom section with button and Stars */}
             <div className="flex items-center justify-between pt-4 border-t border-gray-100 mt-auto">
               <button 
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-white transition-all duration-300 shadow-md hover:shadow-lg group/btn"
-                style={{ borderRadius: '4px', backgroundColor: '#52B54B', fontSize: '14px', fontWeight: 600 }}
+                className="inline-flex items-center gap-2 px-4 py-2 text-white transition-all duration-300 group/btn"
+                style={{ borderRadius: '4px', backgroundColor: '#52B54B', fontSize: '14px', fontWeight: 600, boxShadow: 'none' }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = '#469F40';
+                  e.currentTarget.style.boxShadow = '0 8px 32px rgba(82, 181, 75, 0.25)';
                   setIsButtonHovered(true);
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.backgroundColor = '#52B54B';
+                  e.currentTarget.style.boxShadow = 'none';
                   setIsButtonHovered(false);
                 }}
                 onClick={handleOpenModal}
               >
                 View Details
-                <ArrowRight className={`h-4 w-4 transition-transform duration-300 ${isButtonHovered ? 'translate-x-1' : ''}`} />
+                <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover/btn:translate-x-1" />
               </button>
               
               <div className="flex items-center gap-1">
@@ -252,12 +273,20 @@ export function ProductCard({ product, isVisible, allProducts = [], currentIndex
             <div className="sticky top-0 z-10 p-6" style={{ backgroundColor: '#FAF7F0' }}>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="inline-flex items-center gap-2 px-4 py-2 transition-all duration-300"
-                style={{ borderRadius: '4px', backgroundColor: '#B4A585', color: '#FFFFFF' }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#9B8F73'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#B4A585'}
+                className="inline-flex items-center gap-2 px-4 py-2 transition-colors"
+                style={{ 
+                  borderRadius: '4px', 
+                  background: 'none', 
+                  border: 'none', 
+                  color: '#4E342E', 
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 400
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
+                onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
               >
-                <ArrowLeft className="h-5 w-5" />
+                <ArrowLeft className="h-4 w-4" />
                 Back
               </button>
             </div>
@@ -269,7 +298,7 @@ export function ProductCard({ product, isVisible, allProducts = [], currentIndex
                 {/* Image - Top Left */}
                 <div className="w-full relative">
                   <ImageWithFallback
-                    src={`https://images.unsplash.com/photo-${1500000000000 + modalProduct.id}?w=1200&h=600&fit=crop`}
+                    src={modalProduct.image_url || getPlaceholderImage(modalProduct.id, 1200, 600)}
                     alt={modalProduct.name}
                     className="w-full h-96 object-cover"
                     style={{ borderRadius: '4px' }}
@@ -293,12 +322,18 @@ export function ProductCard({ product, isVisible, allProducts = [], currentIndex
                       <span style={{ fontSize: '36px', fontWeight: 700, color: '#52B54B' }}>{modalProduct.price}</span>
                     </div>
                     <button 
-                      className="inline-flex items-center gap-2 px-6 py-3 text-white transition-all shadow-md"
-                      style={{ borderRadius: '4px', backgroundColor: '#52B54B' }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#469F40'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#52B54B'}
+                      className="inline-flex items-center gap-2 px-8 py-4 text-white transition-all"
+                      style={{ borderRadius: '4px', backgroundColor: '#52B54B', boxShadow: 'none', fontSize: '14px', fontWeight: 600 }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#469F40';
+                        e.currentTarget.style.boxShadow = '0 8px 32px rgba(82, 181, 75, 0.25)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#52B54B';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
                     >
-                      <ShoppingCart className="h-5 w-5" />
+                      <ShoppingCart className="h-4 w-4" />
                       View Product
                     </button>
                   </div>
@@ -342,19 +377,19 @@ export function ProductCard({ product, isVisible, allProducts = [], currentIndex
                   <h3 className="mb-4" style={{ fontSize: '22px', fontWeight: 700, color: '#4E342E' }}>Pros</h3>
                   <ul className="space-y-3">
                     <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <Check className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
+                      <Check className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
                       <span style={{ fontSize: '17px' }}>Exceptional build quality and durability</span>
                     </li>
                     <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <Check className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
+                      <Check className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
                       <span style={{ fontSize: '17px' }}>Great value for money</span>
                     </li>
                     <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <Check className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
+                      <Check className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
                       <span style={{ fontSize: '17px' }}>Positive user reviews across the board</span>
                     </li>
                     <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <Check className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
+                      <Check className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
                       <span style={{ fontSize: '17px' }}>Modern design that fits any style</span>
                     </li>
                   </ul>
@@ -365,15 +400,15 @@ export function ProductCard({ product, isVisible, allProducts = [], currentIndex
                   <h3 className="mb-4" style={{ fontSize: '22px', fontWeight: 700, color: '#4E342E' }}>Cons</h3>
                   <ul className="space-y-3">
                     <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <X className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
+                      <X className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
                       <span style={{ fontSize: '17px' }}>Premium pricing may not suit all budgets</span>
                     </li>
                     <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <X className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
+                      <X className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
                       <span style={{ fontSize: '17px' }}>Limited color options available</span>
                     </li>
                     <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                      <X className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
+                      <X className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
                       <span style={{ fontSize: '17px' }}>Occasional stock shortages</span>
                     </li>
                   </ul>
@@ -387,84 +422,84 @@ export function ProductCard({ product, isVisible, allProducts = [], currentIndex
                   <table className="w-full">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>Metric</th>
-                        <th className="px-6 py-3 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>Score</th>
-                        <th className="px-6 py-3 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>Industry Avg</th>
-                        <th className="px-6 py-3 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>Rating</th>
+                        <th className="px-6 py-4 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>Metric</th>
+                        <th className="px-6 py-4 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>Score</th>
+                        <th className="px-6 py-4 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>Industry Avg</th>
+                        <th className="px-6 py-4 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>Rating</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4" style={{ fontSize: '15px', color: '#4E342E' }}>Build Quality</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2.5 py-1 bg-emerald-100 text-emerald-700" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px' }}>
+                      <tr className="bg-white hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-5" style={{ fontSize: '15px', color: '#4E342E' }}>Build Quality</td>
+                        <td className="px-6 py-5">
+                          <span className="inline-flex items-center px-2.5 py-1" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px', backgroundColor: '#D1FAE5', color: '#065F46' }}>
                             9.2/10
                           </span>
                         </td>
-                        <td className="px-6 py-4" style={{ fontSize: '14px', color: '#4E342E' }}>7.5/10</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-700" style={{ fontSize: '13px', fontWeight: 600, borderRadius: '4px' }}>
-                            <Check className="h-3 w-3" />
+                        <td className="px-6 py-5" style={{ fontSize: '14px', color: '#4E342E' }}>7.5/10</td>
+                        <td className="px-6 py-5">
+                          <span className="inline-flex items-center gap-2 px-2.5 py-1" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px', ...getBadgeStyle('Excellent') }}>
+                            <Check className="h-4 w-4" />
                             Excellent
                           </span>
                         </td>
                       </tr>
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4" style={{ fontSize: '15px', color: '#4E342E' }}>Value for Money</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2.5 py-1 bg-emerald-100 text-emerald-700" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px' }}>
+                      <tr className="bg-gray-50 hover:bg-gray-100 transition-colors">
+                        <td className="px-6 py-5" style={{ fontSize: '15px', color: '#4E342E' }}>Value for Money</td>
+                        <td className="px-6 py-5">
+                          <span className="inline-flex items-center px-2.5 py-1" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px', backgroundColor: '#D1FAE5', color: '#065F46' }}>
                             8.7/10
                           </span>
                         </td>
-                        <td className="px-6 py-4" style={{ fontSize: '14px', color: '#4E342E' }}>7.0/10</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-700" style={{ fontSize: '13px', fontWeight: 600, borderRadius: '4px' }}>
-                            <Check className="h-3 w-3" />
+                        <td className="px-6 py-5" style={{ fontSize: '14px', color: '#4E342E' }}>7.0/10</td>
+                        <td className="px-6 py-5">
+                          <span className="inline-flex items-center gap-2 px-2.5 py-1" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px', ...getBadgeStyle('Great') }}>
+                            <Check className="h-4 w-4" />
                             Great
                           </span>
                         </td>
                       </tr>
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4" style={{ fontSize: '15px', color: '#4E342E' }}>Design</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2.5 py-1 bg-emerald-100 text-emerald-700" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px' }}>
+                      <tr className="bg-white hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-5" style={{ fontSize: '15px', color: '#4E342E' }}>Design</td>
+                        <td className="px-6 py-5">
+                          <span className="inline-flex items-center px-2.5 py-1" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px', backgroundColor: '#D1FAE5', color: '#065F46' }}>
                             9.5/10
                           </span>
                         </td>
-                        <td className="px-6 py-4" style={{ fontSize: '14px', color: '#4E342E' }}>8.0/10</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-700" style={{ fontSize: '13px', fontWeight: 600, borderRadius: '4px' }}>
-                            <Check className="h-3 w-3" />
+                        <td className="px-6 py-5" style={{ fontSize: '14px', color: '#4E342E' }}>8.0/10</td>
+                        <td className="px-6 py-5">
+                          <span className="inline-flex items-center gap-2 px-2.5 py-1" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px', ...getBadgeStyle('Outstanding') }}>
+                            <Check className="h-4 w-4" />
                             Outstanding
                           </span>
                         </td>
                       </tr>
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4" style={{ fontSize: '15px', color: '#4E342E' }}>Durability</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2.5 py-1 bg-emerald-100 text-emerald-700" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px' }}>
+                      <tr className="bg-gray-50 hover:bg-gray-100 transition-colors">
+                        <td className="px-6 py-5" style={{ fontSize: '15px', color: '#4E342E' }}>Durability</td>
+                        <td className="px-6 py-5">
+                          <span className="inline-flex items-center px-2.5 py-1" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px', backgroundColor: '#D1FAE5', color: '#065F46' }}>
                             8.9/10
                           </span>
                         </td>
-                        <td className="px-6 py-4" style={{ fontSize: '14px', color: '#4E342E' }}>7.3/10</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-700" style={{ fontSize: '13px', fontWeight: 600, borderRadius: '4px' }}>
-                            <Check className="h-3 w-3" />
+                        <td className="px-6 py-5" style={{ fontSize: '14px', color: '#4E342E' }}>7.3/10</td>
+                        <td className="px-6 py-5">
+                          <span className="inline-flex items-center gap-2 px-2.5 py-1" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px', ...getBadgeStyle('Excellent') }}>
+                            <Check className="h-4 w-4" />
                             Excellent
                           </span>
                         </td>
                       </tr>
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4" style={{ fontSize: '15px', color: '#4E342E' }}>Customer Satisfaction</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2.5 py-1 bg-emerald-100 text-emerald-700" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px' }}>
+                      <tr className="bg-white hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-5" style={{ fontSize: '15px', color: '#4E342E' }}>Customer Satisfaction</td>
+                        <td className="px-6 py-5">
+                          <span className="inline-flex items-center px-2.5 py-1" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px', backgroundColor: '#D1FAE5', color: '#065F46' }}>
                             9.1/10
                           </span>
                         </td>
-                        <td className="px-6 py-4" style={{ fontSize: '14px', color: '#4E342E' }}>7.8/10</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-700" style={{ fontSize: '13px', fontWeight: 600, borderRadius: '4px' }}>
-                            <Check className="h-3 w-3" />
+                        <td className="px-6 py-5" style={{ fontSize: '14px', color: '#4E342E' }}>7.8/10</td>
+                        <td className="px-6 py-5">
+                          <span className="inline-flex items-center gap-2 px-2.5 py-1" style={{ fontSize: '14px', fontWeight: 600, borderRadius: '4px', ...getBadgeStyle('Excellent') }}>
+                            <Check className="h-4 w-4" />
                             Excellent
                           </span>
                         </td>
@@ -493,9 +528,9 @@ export function ProductCard({ product, isVisible, allProducts = [], currentIndex
                           }`}
                           style={{ borderRadius: '4px', overflow: 'hidden' }}
                         >
-                          <div className="bg-white border border-gray-200 hover:shadow-lg transition-all">
+                          <div className="bg-white border border-gray-200 transition-all" style={{ boxShadow: 'none' }} onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.08)'} onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}>
                             <ImageWithFallback
-                              src={`https://images.unsplash.com/photo-${1500000000000 + product.id}?w=400&h=300&fit=crop`}
+                              src={product.image_url || getPlaceholderImage(product.id, 400, 300)}
                               alt={product.name}
                               className="w-full h-32 object-cover"
                             />
@@ -514,10 +549,10 @@ export function ProductCard({ product, isVisible, allProducts = [], currentIndex
                           carousel.scrollBy({ left: -200, behavior: 'smooth' });
                         }
                       }}
-                      className="absolute left-0 top-1/2 -translate-y-1/2 p-2 bg-white/90 backdrop-blur-sm shadow-lg hover:bg-white transition-all z-10"
-                      style={{ borderRadius: '4px' }}
+                      className="absolute left-0 top-1/2 -translate-y-1/2 p-2 bg-white/90 backdrop-blur-sm hover:bg-white transition-all z-10"
+                      style={{ borderRadius: '4px', boxShadow: '0 4px 24px rgba(0, 0, 0, 0.08)' }}
                     >
-                      <ChevronLeft className="h-5 w-5" style={{ color: '#4E342E' }} />
+                      <ChevronLeft className="h-4 w-4" style={{ color: '#4E342E' }} />
                     </button>
                     <button
                       onClick={(e) => {
@@ -527,10 +562,10 @@ export function ProductCard({ product, isVisible, allProducts = [], currentIndex
                           carousel.scrollBy({ left: 200, behavior: 'smooth' });
                         }
                       }}
-                      className="absolute right-0 top-1/2 -translate-y-1/2 p-2 bg-white/90 backdrop-blur-sm shadow-lg hover:bg-white transition-all z-10"
-                      style={{ borderRadius: '4px' }}
+                      className="absolute right-0 top-1/2 -translate-y-1/2 p-2 bg-white/90 backdrop-blur-sm hover:bg-white transition-all z-10"
+                      style={{ borderRadius: '4px', boxShadow: '0 4px 24px rgba(0, 0, 0, 0.08)' }}
                     >
-                      <ChevronRight className="h-5 w-5" style={{ color: '#4E342E' }} />
+                      <ChevronRight className="h-4 w-4" style={{ color: '#4E342E' }} />
                     </button>
                   </div>
                 </div>

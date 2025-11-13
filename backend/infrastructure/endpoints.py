@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.agent.orchestrator import ProductComparisonAgent, WorkflowBudgetExceeded
+from backend.api.glm_client import GlmClientError
 from backend.models.schemas import CompareRequest, ComparisonResponse
 from config import get_settings
 
@@ -188,19 +189,49 @@ async def compare_endpoint(request: Request) -> tuple[dict[str, Any], int]:
             "error_code": "VALIDATION_ERROR",
         }, status.HTTP_400_BAD_REQUEST
 
+    except GlmClientError as exc:
+        error_msg = str(exc)
+        LOG_ERROR(
+            "Compare endpoint sonar failure",
+            user_id=getattr(request, "user_id", "anonymous"),
+            category=category,
+            error=error_msg,
+            traceback=traceback.format_exc(),
+        )
+        METRICS.increment("compare.sonar_error")
+        return {
+            "status": "ERROR",
+            "error": "Upstream model error",
+            "error_code": "UPSTREAM_ERROR",
+            "details": error_msg,
+        }, status.HTTP_502_BAD_GATEWAY
+
     except Exception as exc:
+        error_type = type(exc).__name__
+        error_msg = str(exc)
         LOG_ERROR(
             "Compare endpoint exception",
             user_id=getattr(request, "user_id", "anonymous"),
             category=category,
-            error=str(exc),
+            error=error_msg,
+            error_type=error_type,
             traceback=traceback.format_exc(),
         )
-        METRICS.increment("compare.exception")
+        METRICS.increment("compare.exception", error_type=error_type)
+        
+        # Provide more helpful error messages for common issues
+        if "API key" in error_msg or "not configured" in error_msg:
+            return {
+                "status": "ERROR",
+                "error": "API configuration error: " + error_msg,
+                "error_code": "CONFIGURATION_ERROR",
+            }, status.HTTP_500_INTERNAL_SERVER_ERROR
+        
         return {
             "status": "ERROR",
             "error": "Internal server error",
             "error_code": "INTERNAL_ERROR",
+            "error_type": error_type,
         }, status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
@@ -439,6 +470,52 @@ async def admin_cache_stats(request: Request) -> tuple[dict[str, Any], int]:
         }, status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
+async def _clear_all_cache_keys() -> dict[str, int]:
+    """Clear all cache keys matching known patterns."""
+    patterns = ["comparison:*", "product:*", "alias:*", "metrics:*"]
+    deleted_counts = {}
+    
+    for pattern in patterns:
+        keys = list(raw_redis_connection.scan_iter(match=pattern, count=1000))
+        if keys:
+            deleted = raw_redis_connection.delete(*keys)
+            deleted_counts[pattern] = deleted
+        else:
+            deleted_counts[pattern] = 0
+    
+    return deleted_counts
+
+
+@endpoint_wrapper(requires_auth=True, requires_admin=True)
+async def admin_clear_all_cache(request: Request) -> tuple[dict[str, Any], int]:
+    """POST /admin/cache/clear: clear all cached data."""
+    
+    LOG_INFO("Admin clearing all cache", admin_user=getattr(request, "user_id", "unknown_admin"))
+    
+    try:
+        deleted_counts = await asyncio.to_thread(_clear_all_cache_keys)
+        total_deleted = sum(deleted_counts.values())
+        
+        LOG_INFO("All cache cleared", deleted_counts=deleted_counts, total=total_deleted)
+        METRICS.increment("admin.cache.clear.success")
+        
+        return {
+            "status": "SUCCESS",
+            "message": "All cache cleared",
+            "deleted_keys": deleted_counts,
+            "total_deleted": total_deleted,
+        }, status.HTTP_200_OK
+    
+    except Exception as exc:
+        LOG_ERROR("Failed to clear cache", error=str(exc), admin_user=getattr(request, "user_id", "unknown_admin"))
+        METRICS.increment("admin.cache.clear.error")
+        return {
+            "status": "ERROR",
+            "error": "Failed to clear cache",
+            "details": str(exc),
+        }, status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
 @endpoint_wrapper(requires_auth=True, requires_admin=True)
 async def admin_trigger_price_refresh(request: Request) -> tuple[dict[str, Any], int]:
     """POST /admin/jobs/trigger/price-refresh: manually start the price refresh job."""
@@ -542,6 +619,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 __all__ = [
     "admin_cache_stats",
+    "admin_clear_all_cache",
     "admin_invalidate_product_cache",
     "admin_invalidate_query_cache",
     "admin_trigger_price_refresh",

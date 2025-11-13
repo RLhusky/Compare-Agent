@@ -154,10 +154,17 @@ def load_config() -> dict[str, Any]:
     config["API_KEY_HEADER"] = load_from_env("API_KEY_HEADER", "X-API-Key")
     config["ADMIN_API_KEYS"] = _split_csv(load_from_env("ADMIN_API_KEYS", ""))
     config["USER_API_KEYS"] = _split_csv(load_from_env("USER_API_KEYS", ""))
-    config["REQUIRE_AUTH"] = _boolean_from_env(load_from_env("REQUIRE_AUTH", "true"), "REQUIRE_AUTH")
+    config["REQUIRE_AUTH"] = _boolean_from_env(load_from_env("REQUIRE_AUTH", "false"), "REQUIRE_AUTH")
 
     # CORS
-    config["CORS_ORIGINS"] = _split_csv(load_from_env("CORS_ORIGINS", "http://localhost:3000"))
+    cors_origins = _split_csv(load_from_env("CORS_ORIGINS", "http://localhost:3000"))
+    local_origins = {
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    }
+    config["CORS_ORIGINS"] = sorted({*cors_origins, *local_origins})
     config["CORS_MAX_AGE"] = _int_from_env(load_from_env("CORS_MAX_AGE", "3600"), "CORS_MAX_AGE")
 
     # Rate limiting

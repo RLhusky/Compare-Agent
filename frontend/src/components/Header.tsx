@@ -29,7 +29,7 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-50">
-      <div className="w-full backdrop-blur-md border-b border-white/40 shadow-sm py-6 px-8" style={{ backgroundColor: '#FAF7F0' }}>
+      <div className="w-full backdrop-blur-md border-b border-white/40 py-6 px-8" style={{ backgroundColor: '#FAF7F0', boxShadow: '0 4px 24px rgba(0, 0, 0, 0.04)' }}>
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           {/* Kangaroo logo on the left */}
           <Link href="/" className="flex items-center cursor-pointer">
@@ -53,10 +53,8 @@ export function Header() {
           <div className="flex items-center gap-2">
             <button
               onClick={openContactPopup}
-              className="px-6 py-2 rounded-xl text-white transition-all duration-300 shadow-sm"
-              style={{ backgroundColor: '#B4A585' }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#9B8F73'}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#B4A585'}
+              className="px-4 py-2 transition-colors underline"
+              style={{ color: '#000000', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 'normal' }}
             >
               Contact Us
             </button>

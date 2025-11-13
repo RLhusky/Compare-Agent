@@ -51,7 +51,7 @@ export function HeroSection() {
                               style={{ width: '40px', height: '40px' }}
                               onClick={() => setIsFilterOpen(!isFilterOpen)}
                             >
-                              <SlidersHorizontal className="h-5 w-5" style={{ color: '#4E342E' }} />
+                              <SlidersHorizontal className="h-4 w-4" style={{ color: '#4E342E' }} />
                             </button>
                             <input
                               type="text"
@@ -76,7 +76,7 @@ export function HeroSection() {
                               onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#469F40'}
                               onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#52B54B'}
                             >
-                              <Send className="h-5 w-5 text-white" />
+                              <Send className="h-4 w-4 text-white" />
                             </button>
                           </div>
                         </div>

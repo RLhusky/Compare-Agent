@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback } from 'react';
 interface ProductCardData {
   id: string;
   name: string;
-  image: string;
+  image?: string;
   ratingValue: number;
   ratingText?: string;
   priceDisplay?: string;
@@ -55,6 +55,24 @@ function getLabelStyle(label: string | null) {
     borderColor: '#000000',
     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)'
   };
+}
+
+// Standardized badge styles - green for positive, amber for neutral, red for warnings
+function getBadgeStyle(rating: string): { bg: string, text: string } {
+  const ratingLower = rating.toLowerCase();
+  if (ratingLower.includes('excellent') || ratingLower.includes('outstanding')) {
+    return { bg: '#D1FAE5', text: '#065F46' }; // green-50, green-800
+  } else if (ratingLower.includes('great') || ratingLower.includes('good')) {
+    return { bg: '#FEF3C7', text: '#92400E' }; // amber-50, amber-800
+  } else if (ratingLower.includes('fair') || ratingLower.includes('average')) {
+    return { bg: '#FED7AA', text: '#9A3412' }; // amber-100, amber-900
+  } else {
+    return { bg: '#FEE2E2', text: '#991B1B' }; // red-50, red-800
+  }
+}
+
+function getPlaceholderImage(productId: string, width: number, height: number) {
+  return `https://picsum.photos/seed/search-${productId}/${width}/${height}`;
 }
 
 export function SearchProductCard({
@@ -202,14 +220,14 @@ export function SearchProductCard({
   return (
     <>
       <div className="group transition-all duration-500 transform">
-        <div className="bg-white rounded-none border border-gray-200 hover:shadow-lg transition-all duration-300 overflow-hidden hover:-translate-y-2 h-full flex flex-col" style={{ boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)' }}>
+        <div className="bg-white rounded-none border border-gray-200 transition-all duration-300 overflow-hidden hover:-translate-y-2 h-full flex flex-col" style={{ boxShadow: 'none' }} onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 12px 48px rgba(0, 0, 0, 0.08)'} onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}>
           {/* Image container */}
           <div 
             className="relative aspect-[4/3] overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200 cursor-pointer"
             onClick={() => setIsModalOpen(true)}
           >
             <ImageWithFallback
-              src={image}
+              src={image || getPlaceholderImage(id, 400, 300)}
               alt={name}
               className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
             />
@@ -257,20 +275,22 @@ export function SearchProductCard({
             {/* Bottom section with button and Stars */}
             <div className="flex items-center justify-between gap-4 pt-4 border-t border-gray-100 mt-auto">
               <button 
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-white transition-all duration-300 shadow-md hover:shadow-lg group/btn flex-shrink-0"
-                style={{ borderRadius: '4px', backgroundColor: '#52B54B', fontSize: '14px', fontWeight: 600 }}
+                className="inline-flex items-center gap-2 px-4 py-2 text-white transition-all duration-300 group/btn flex-shrink-0"
+                style={{ borderRadius: '4px', backgroundColor: '#52B54B', fontSize: '14px', fontWeight: 600, boxShadow: 'none' }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = '#469F40';
+                  e.currentTarget.style.boxShadow = '0 8px 32px rgba(82, 181, 75, 0.25)';
                   setIsButtonHovered(true);
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.backgroundColor = '#52B54B';
+                  e.currentTarget.style.boxShadow = 'none';
                   setIsButtonHovered(false);
                 }}
                 onClick={handleOpenModal}
               >
                 View Details
-                <ArrowRight className={`h-4 w-4 transition-transform duration-300 ${isButtonHovered ? 'translate-x-1' : ''}`} />
+                <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover/btn:translate-x-1" />
               </button>
               
               <div className="flex items-center gap-1 flex-shrink-0">
@@ -291,12 +311,20 @@ export function SearchProductCard({
             <div className="sticky top-0 z-10 p-6" style={{ backgroundColor: '#FAF7F0' }}>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="inline-flex items-center gap-2 px-4 py-2 transition-all duration-300"
-                style={{ borderRadius: '4px', backgroundColor: '#B4A585', color: '#FFFFFF' }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#9B8F73'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#B4A585'}
+                className="inline-flex items-center gap-2 px-4 py-2 transition-colors"
+                style={{ 
+                  borderRadius: '4px', 
+                  background: 'none', 
+                  border: 'none', 
+                  color: '#4E342E', 
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 400
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
+                onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
               >
-                <ArrowLeft className="h-5 w-5" />
+                <ArrowLeft className="h-4 w-4" />
                 Back
               </button>
             </div>
@@ -308,7 +336,7 @@ export function SearchProductCard({
                 {/* Image - Top Left */}
                 <div className="w-full relative">
                   <ImageWithFallback
-                    src={modalProduct.image}
+                    src={modalProduct.image || getPlaceholderImage(modalProduct.id, 1200, 600)}
                     alt={modalProduct.name}
                     className="w-full h-96 object-cover"
                     style={{ borderRadius: '4px' }}
@@ -337,12 +365,18 @@ export function SearchProductCard({
                         e.stopPropagation();
                         setIsLinkPopupOpen(true);
                       }}
-                      className="inline-flex items-center gap-2 px-6 py-3 text-white transition-all shadow-md"
-                      style={{ borderRadius: '4px', backgroundColor: '#52B54B' }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#469F40'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#52B54B'}
+                      className="inline-flex items-center gap-2 px-8 py-4 text-white transition-all"
+                      style={{ borderRadius: '4px', backgroundColor: '#52B54B', boxShadow: 'none', fontSize: '14px', fontWeight: 600 }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#469F40';
+                        e.currentTarget.style.boxShadow = '0 8px 32px rgba(82, 181, 75, 0.25)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#52B54B';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
                     >
-                      <ShoppingCart className="h-5 w-5" />
+                      <ShoppingCart className="h-4 w-4" />
                       View Product
                     </button>
                   </div>
@@ -374,13 +408,13 @@ export function SearchProductCard({
                     {modalProduct.strengths && modalProduct.strengths.length > 0 ? (
                       modalProduct.strengths.map((strength, i) => (
                         <li key={i} className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                          <Check className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
+                          <Check className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
                           <span style={{ fontSize: '17px' }}>{strength}</span>
                         </li>
                       ))
                     ) : (
                       <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                        <Check className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
+                        <Check className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: '#28A745' }} />
                         <span style={{ fontSize: '17px' }}>No strengths listed</span>
                       </li>
                     )}
@@ -394,13 +428,13 @@ export function SearchProductCard({
                     {modalProduct.weaknesses && modalProduct.weaknesses.length > 0 ? (
                       modalProduct.weaknesses.map((weakness, i) => (
                         <li key={i} className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                          <X className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
+                          <X className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
                           <span style={{ fontSize: '17px' }}>{weakness}</span>
                         </li>
                       ))
                     ) : (
                       <li className="flex items-start gap-2" style={{ color: '#4E342E' }}>
-                        <X className="h-5 w-5 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
+                        <X className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: '#DC3545' }} />
                         <span style={{ fontSize: '17px' }}>No weaknesses listed</span>
                       </li>
                     )}
@@ -417,7 +451,7 @@ export function SearchProductCard({
                       <thead className="bg-gray-50">
                         <tr>
                           {metricsTable.headers.map((header, i) => (
-                            <th key={i} className="px-6 py-3 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>
+                            <th key={i} className="px-6 py-4 text-left" style={{ fontSize: '14px', fontWeight: 600, color: '#4E342E' }}>
                               {header}
                             </th>
                           ))}
@@ -425,9 +459,9 @@ export function SearchProductCard({
                       </thead>
                       <tbody className="divide-y divide-gray-200">
                         {metricsTable.rows.map((row, rowIndex) => (
-                          <tr key={rowIndex} className="hover:bg-gray-50 transition-colors">
+                          <tr key={rowIndex} className={`${rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}>
                             {row.map((cell, cellIndex) => (
-                              <td key={cellIndex} className="px-6 py-4" style={{ fontSize: '15px', color: '#4E342E' }}>
+                              <td key={cellIndex} className="px-6 py-5" style={{ fontSize: '15px', color: '#4E342E' }}>
                                 {cell}
                               </td>
                             ))}
@@ -458,7 +492,7 @@ export function SearchProductCard({
                           }`}
                           style={{ borderRadius: '4px', overflow: 'hidden' }}
                         >
-                          <div className="bg-white border border-gray-200 hover:shadow-lg transition-all">
+                          <div className="bg-white border border-gray-200 transition-all" style={{ boxShadow: 'none' }} onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.08)'} onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}>
                             <ImageWithFallback
                               src={product.image}
                               alt={product.name}
