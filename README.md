@@ -13,7 +13,7 @@ This repository contains both the backend and frontend:
 ## Backend
 
 ### Key Capabilities
-- GLM 4.6 via OpenRouter with parallel tool execution (500 TPS throughput)
+- GLM 4.6 via OpenRouter using **Cerebras** provider (500 TPS throughput)
 - Brave Search integration for real-time product discovery
 - Parallel product research with up to 20 concurrent agents
 - Aggressive Redis caching across metrics, product data, and comparisons
@@ -114,6 +114,7 @@ All settings are defined in `config.py` (Pydantic BaseSettings).
 Environment variables (with defaults) include:
 
 - `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL`
+- `OPENROUTER_ROUTING` (default: Cerebras primary, Fireworks fallback)
 - `BRAVE_API_KEY`
 - `GLM_MODEL` (default: "z-ai/glm-4.6")
 - `GLM_TIMEOUT_SECONDS` (default: 8.0)

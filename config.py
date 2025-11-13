@@ -20,8 +20,12 @@ class Settings(BaseSettings):
     openrouter_api_key: str = Field(default="", validation_alias="OPENROUTER_API_KEY")
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", validation_alias="OPENROUTER_BASE_URL")
     glm_model: str = Field(default="z-ai/glm-4.6", validation_alias="GLM_MODEL")
-    openrouter_routing: dict[str, Any] | None = Field(
-        default=None,
+    openrouter_routing: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "sort": "throughput",
+            "order": ["cerebras", "fireworks"],
+            "allow_fallbacks": True,
+        },
         validation_alias="OPENROUTER_ROUTING",
     )
     glm_timeout_seconds: float = Field(default=8.0, validation_alias="GLM_TIMEOUT_SECONDS")
